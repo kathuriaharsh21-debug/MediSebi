@@ -22,7 +22,7 @@ from app.models.salt import Salt
 from app.models.audit_log import AuditLog, ActionType
 from app.schemas.medicine import MedicineCreate, MedicineUpdate, MedicineResponse, MedicineListResponse
 
-router = APIRouter(prefix="/medicines", tags=["Medicines"])
+router = APIRouter(tags=["Medicines"])
 
 
 def _create_audit_log(

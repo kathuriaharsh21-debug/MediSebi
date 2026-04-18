@@ -12,6 +12,10 @@ from app.api.v1.medicines import router as medicines_router
 from app.api.v1.shops import router as shops_router
 from app.api.v1.inventory import router as inventory_router
 from app.api.v1.substitution import router as substitution_router
+from app.api.v1.expiry import router as expiry_router
+from app.api.v1.climate import router as climate_router
+from app.api.v1.transfers import router as transfers_router
+from app.api.v1.forecast import router as forecast_router
 
 api_router = APIRouter()
 
@@ -22,3 +26,7 @@ api_router.include_router(medicines_router, prefix="/medicines", tags=["Medicine
 api_router.include_router(shops_router, prefix="/shops", tags=["Shops"])
 api_router.include_router(inventory_router, prefix="/inventory", tags=["Inventory"])
 api_router.include_router(substitution_router, prefix="/substitution", tags=["Substitution"])
+api_router.include_router(expiry_router, prefix="/expiry", tags=["Expiry Watchdog"])
+api_router.include_router(climate_router, prefix="/climate", tags=["Climate Intelligence"])
+api_router.include_router(transfers_router, prefix="/transfers", tags=["Redistribution"])
+api_router.include_router(forecast_router, prefix="/forecast", tags=["Demand Forecast"])

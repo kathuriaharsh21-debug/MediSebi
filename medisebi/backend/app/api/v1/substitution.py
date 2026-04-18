@@ -26,7 +26,7 @@ from app.schemas.substitution import (
     SubstitutionAlternative,
 )
 
-router = APIRouter(prefix="/substitution", tags=["Substitution"])
+router = APIRouter(tags=["Substitution"])
 
 
 @router.post("/find-alternatives", response_model=SubstitutionResponse, summary="Find alternative medicines by salt")

@@ -22,7 +22,7 @@ from app.models.inventory import Inventory
 from app.models.audit_log import AuditLog, ActionType
 from app.schemas.shop import ShopCreate, ShopUpdate, ShopResponse, ShopListResponse
 
-router = APIRouter(prefix="/shops", tags=["Shops"])
+router = APIRouter(tags=["Shops"])
 
 
 def _create_audit_log(

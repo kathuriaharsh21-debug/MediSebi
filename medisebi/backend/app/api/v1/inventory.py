@@ -32,7 +32,7 @@ from app.schemas.inventory import (
     InventoryListResponse,
 )
 
-router = APIRouter(prefix="/inventory", tags=["Inventory"])
+router = APIRouter(tags=["Inventory"])
 
 
 def _create_audit_log(
@@ -128,6 +128,71 @@ def list_inventory(
     ).scalars().all()
 
     response_items = [_enrich_inventory_response(db, inv) for inv in items]
+    return InventoryListResponse(items=response_items, total=total, page=page, size=size)
+
+
+# ── ALERTS: EXPIRING SOON (before /{id} to avoid route capture) ──
+@router.get("/alerts/expiring", response_model=InventoryListResponse, summary="Get expiring items")
+def get_expiring_items(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    days: int = Query(30, ge=1, le=365, description="Days within which items expire"),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+) -> InventoryListResponse:
+    """Get inventory items expiring within N days."""
+    cutoff = date.today() + timedelta(days=days)
+    query = (
+        select(Inventory)
+        .where(Inventory.expiry_date >= date.today(), Inventory.expiry_date <= cutoff)
+        .order_by(Inventory.expiry_date.asc())
+    )
+
+    count_q = select(func.count()).select_from(query.subquery())
+    total = db.execute(count_q).scalar() or 0
+
+    items = db.execute(query.offset((page - 1) * size).limit(size)).scalars().all()
+    response_items = [_enrich_inventory_response(db, inv) for inv in items]
+    return InventoryListResponse(items=response_items, total=total, page=page, size=size)
+
+
+# ── ALERTS: LOW STOCK (before /{id} to avoid route capture) ──────
+@router.get("/alerts/low-stock", response_model=InventoryListResponse, summary="Get low-stock items")
+def get_low_stock_items(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+) -> InventoryListResponse:
+    """
+    Get inventory items below their salt's warning_threshold or critical_threshold.
+    Items below critical_threshold appear first (most urgent).
+    """
+    query = (
+        select(Inventory)
+        .join(Medicine, Inventory.med_id == Medicine.id)
+        .join(Salt, Medicine.salt_id == Salt.id)
+        .where(
+            (Inventory.quantity <= Salt.warning_threshold)
+            | (Inventory.quantity <= Salt.critical_threshold)
+        )
+        .order_by(Inventory.quantity.asc())
+    )
+
+    count_q = select(func.count()).select_from(query.subquery())
+    total = db.execute(count_q).scalar() or 0
+
+    items = db.execute(query.offset((page - 1) * size).limit(size)).scalars().all()
+    response_items = []
+    for inv in items:
+        resp = _enrich_inventory_response(db, inv)
+        if inv.medicine and inv.medicine.salt:
+            salt = inv.medicine.salt
+            if salt.critical_threshold is not None and inv.quantity <= salt.critical_threshold:
+                resp.__dict__["_alert_level"] = "critical"
+            elif salt.warning_threshold is not None and inv.quantity <= salt.warning_threshold:
+                resp.__dict__["_alert_level"] = "warning"
+        response_items.append(resp)
     return InventoryListResponse(items=response_items, total=total, page=page, size=size)
 
 
@@ -352,69 +417,3 @@ def adjust_inventory(
     db.refresh(inv)
     return _enrich_inventory_response(db, inv)
 
-
-# ── ALERTS: EXPIRING SOON ─────────────────────────────────────
-@router.get("/alerts/expiring", response_model=InventoryListResponse, summary="Get expiring items")
-def get_expiring_items(
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    days: int = Query(30, ge=1, le=365, description="Days within which items expire"),
-    page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
-) -> InventoryListResponse:
-    """Get inventory items expiring within N days."""
-    cutoff = date.today() + timedelta(days=days)
-    query = (
-        select(Inventory)
-        .where(Inventory.expiry_date >= date.today(), Inventory.expiry_date <= cutoff)
-        .order_by(Inventory.expiry_date.asc())
-    )
-
-    count_q = select(func.count()).select_from(query.subquery())
-    total = db.execute(count_q).scalar() or 0
-
-    items = db.execute(query.offset((page - 1) * size).limit(size)).scalars().all()
-    response_items = [_enrich_inventory_response(db, inv) for inv in items]
-    return InventoryListResponse(items=response_items, total=total, page=page, size=size)
-
-
-# ── ALERTS: LOW STOCK ─────────────────────────────────────────
-@router.get("/alerts/low-stock", response_model=InventoryListResponse, summary="Get low-stock items")
-def get_low_stock_items(
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
-) -> InventoryListResponse:
-    """
-    Get inventory items below their salt's warning_threshold or critical_threshold.
-    Items below critical_threshold appear first (most urgent).
-    """
-    query = (
-        select(Inventory)
-        .join(Medicine, Inventory.med_id == Medicine.id)
-        .join(Salt, Medicine.salt_id == Salt.id)
-        .where(
-            (Inventory.quantity <= Salt.warning_threshold)
-            | (Inventory.quantity <= Salt.critical_threshold)
-        )
-        .order_by(Inventory.quantity.asc())
-    )
-
-    count_q = select(func.count()).select_from(query.subquery())
-    total = db.execute(count_q).scalar() or 0
-
-    items = db.execute(query.offset((page - 1) * size).limit(size)).scalars().all()
-    response_items = []
-    for inv in items:
-        resp = _enrich_inventory_response(db, inv)
-        # Attach threshold info if available via salt
-        if inv.medicine and inv.medicine.salt:
-            salt = inv.medicine.salt
-            if salt.critical_threshold is not None and inv.quantity <= salt.critical_threshold:
-                resp.__dict__["_alert_level"] = "critical"
-            elif salt.warning_threshold is not None and inv.quantity <= salt.warning_threshold:
-                resp.__dict__["_alert_level"] = "warning"
-        response_items.append(resp)
-
-    return InventoryListResponse(items=response_items, total=total, page=page, size=size)
