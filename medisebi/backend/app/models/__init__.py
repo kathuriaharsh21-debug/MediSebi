@@ -14,7 +14,7 @@ from app.core.database import Base
 
 # ── Import all models to register them with Base.metadata ──────
 from app.models.user import User, UserRole
-from app.models.salt import Salt
+from app.models.salt import Salt, ABCClass
 from app.models.shop import Shop
 from app.models.medicine import Medicine
 from app.models.inventory import Inventory
@@ -23,15 +23,19 @@ from app.models.shop_staff import ShopStaff
 from app.models.stock_transfer import StockTransferRequest, TransferStatus, TransferPriority
 from app.models.demand_forecast import DemandForecast
 from app.models.climate_alert import ClimateAlert, RiskLevel
+from app.models.refresh_token import RefreshToken
+from app.models.password_history import PasswordHistory
+from app.models.notification import Notification, NotificationSeverity, NotificationSource
 
 # ── Public API ─────────────────────────────────────────────────
 __all__ = [
     # Base
     "Base",
-    # Models
+    # Core Models
     "User",
     "UserRole",
     "Salt",
+    "ABCClass",
     "Shop",
     "Medicine",
     "Inventory",
@@ -44,4 +48,10 @@ __all__ = [
     "DemandForecast",
     "ClimateAlert",
     "RiskLevel",
+    # Security Models (Post-Research)
+    "RefreshToken",
+    "PasswordHistory",
+    "Notification",
+    "NotificationSeverity",
+    "NotificationSource",
 ]

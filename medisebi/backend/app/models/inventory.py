@@ -16,8 +16,15 @@ from app.core.mixins import TimestampMixin
 
 class Inventory(Base, TimestampMixin):
     """
-    Real-time stock ledger.
-    NOTE: No soft-delete here — inventory records are immutable financial data.
+    Real-time stock ledger with OPTIMISTIC LOCKING.
+    ─────────────────────────────────────────────────
+    The `version_id` column prevents race conditions when two users
+    modify the same inventory record simultaneously. SQLAlchemy
+    automatically appends `WHERE version_id = :old_version` to UPDATEs.
+    If 0 rows are affected (someone else modified it first), a
+    `StaleDataError` is raised — forcing the caller to retry.
+
+    NOTE: No soft-delete — inventory records are immutable financial data.
     Adjustments are tracked via Audit_Logs, not by deleting records.
     """
     __tablename__ = "inventory"
@@ -105,6 +112,18 @@ class Inventory(Base, TimestampMixin):
         comment="Selling price per unit at this shop",
     )
 
+    # ── Optimistic Locking (Security) ─────────────────────
+    version_id: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        server_default="1",
+        nullable=False,
+        comment=(
+            "Optimistic lock version. Auto-incremented on each UPDATE. "
+            "Prevents race conditions in concurrent stock modifications."
+        ),
+    )
+
     # ── Status Flags ────────────────────────────────────────
     is_reserved: Mapped[bool] = mapped_column(
         # No default — explicit intent required
@@ -131,9 +150,14 @@ class Inventory(Base, TimestampMixin):
         lazy="joined",
     )
 
+    # ── SQLAlchemy Mapper Args for Optimistic Locking ─────
+    __mapper_args__ = {
+        "version_id_col": version_id,
+    }
+
     def __repr__(self) -> str:
         return (
             f"<Inventory id={self.id} med_id={self.med_id} "
             f"shop_id={self.shop_id} qty={self.quantity} "
-            f"expires={self.expiry_date}>"
+            f"expires={self.expiry_date} v={self.version_id}>"
         )
