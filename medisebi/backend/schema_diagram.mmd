@@ -1,0 +1,168 @@
+erDiagram
+    users {
+        int id PK
+        varchar username UK "Unique login"
+        varchar email UK "For notifications"
+        varchar password_hash "Bcrypt hash"
+        varchar full_name
+        enum role "admin | pharmacist"
+        boolean is_locked "Brute-force protection"
+        int failed_login_attempts
+        varchar last_login_at
+        boolean is_active "Soft delete"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    salts {
+        int id PK
+        varchar formula_name UK "e.g. Paracetamol"
+        text description
+        varchar category "Analgesic, Antibiotic..."
+        varchar atc_code "WHO classification"
+        varchar dosage_form
+        varchar standard_strength
+        boolean is_active
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    shops {
+        int id PK
+        varchar name
+        varchar code UK "e.g. PH-NR-001"
+        text address
+        varchar city "For climate predictions"
+        varchar state
+        varchar pincode
+        float latitude "OpenWeather API"
+        float longitude "OpenWeather API"
+        varchar contact_phone
+        varchar contact_email
+        int storage_capacity
+        boolean is_active
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    medicines {
+        int id PK
+        varchar brand_name "e.g. Crocin 500mg"
+        varchar generic_name
+        varchar manufacturer
+        int salt_id FK "Links to salts"
+        varchar dosage_form
+        varchar strength
+        float unit_price
+        boolean temperature_sensitive
+        float min_storage_temp
+        float max_storage_temp
+        text description
+        boolean is_active
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    inventory {
+        int id PK
+        int med_id FK
+        int shop_id FK
+        int quantity "Updated via audit"
+        varchar batch_number
+        date expiry_date "CRITICAL INDEX"
+        float cost_price
+        float selling_price
+        boolean is_reserved "For transfers"
+        varchar storage_location
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    audit_logs {
+        int id PK
+        enum action_type "17 action types"
+        text description
+        text details "JSON before/after"
+        int user_id FK "NULL = system action"
+        varchar ip_address "IPv6 capable"
+        varchar user_agent
+        varchar resource_type
+        int resource_id
+        varchar sha256_hash "Tamper-proof"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    shop_staff {
+        int id PK
+        int user_id FK "CASCADE"
+        int shop_id FK "CASCADE"
+        date assigned_date
+        boolean is_primary
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    stock_transfer_requests {
+        int id PK
+        int from_shop_id FK
+        int to_shop_id FK
+        int med_id FK
+        int inventory_id FK
+        int quantity_requested
+        int quantity_transferred
+        text reason
+        enum priority "low|medium|high|critical"
+        enum status "pending|approved|in_transit|completed|rejected|cancelled"
+        int approved_by FK
+        timestamp approved_at
+        timestamp completed_at
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    demand_forecasts {
+        int id PK
+        int med_id FK "CASCADE"
+        int shop_id FK "CASCADE"
+        date prediction_date
+        float predicted_demand
+        int current_stock
+        int stock_deficit
+        float confidence_score "0.0 to 1.0"
+        varchar model_version
+        text metadata_json
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    climate_alerts {
+        int id PK
+        int shop_id FK "CASCADE"
+        varchar city
+        float temperature_c
+        float humidity_pct
+        varchar weather_condition
+        enum risk_level "low|moderate|high|critical"
+        varchar disease_risk
+        text recommended_salts
+        text recommended_medicines
+        text action_summary
+        text weather_api_response
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    %% ── Relationships ──────────────────────────────────────────────
+    users ||--o{ audit_logs : "performs actions"
+    users ||--o{ shop_staff : "assigned to"
+    salts ||--o{ medicines : "has brand names"
+    shops ||--o{ inventory : "holds stock"
+    shops ||--o{ shop_staff : "employs"
+    shops ||--o{ stock_transfer_requests : "source of"
+    shops ||--o{ stock_transfer_requests : "destination of"
+    shops ||--o{ climate_alerts : "receives alerts"
+    medicines ||--o{ inventory : "tracked in"
+    inventory ||--o{ stock_transfer_requests : "transferred from"
+    medicines ||--o{ demand_forecasts : "forecasted for"
+    shops ||--o{ demand_forecasts : "forecasted for"
