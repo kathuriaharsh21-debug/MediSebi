@@ -5,9 +5,9 @@ import {
 } from 'recharts';
 import {
   Package, AlertTriangle, Clock, Store, TrendingDown, Activity,
-  Loader2, Shield,
+  Loader2, Shield, CloudSun,
 } from 'lucide-react';
-import { inventoryAPI, medicinesAPI, shopsAPI } from '../services/api';
+import { inventoryAPI, medicinesAPI, shopsAPI, expiryAPI, climateAPI, forecastAPI, notificationsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
 const PIE_COLORS = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#EC4899'];
@@ -21,6 +21,13 @@ export default function Dashboard() {
     expiringAlerts: [],
     lowStockAlerts: [],
   });
+  const [intelData, setIntelData] = useState({
+    expiry: null,
+    climate: null,
+    forecast: null,
+    notifications: [],
+  });
+  const [topDeficits, setTopDeficits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalMedicines: 0,
@@ -57,6 +64,29 @@ export default function Dashboard() {
         expiringCount: Array.isArray(expiringAlerts) ? expiringAlerts.length : 0,
         totalShops: shops.length,
       });
+
+      // ── Intelligence API calls (graceful — failures won't break dashboard) ──
+      const [expiryRes, climateRes, forecastRes, notifRes, deficitRes] = await Promise.allSettled([
+        expiryAPI.summary(),
+        climateAPI.dashboard({ size: 5 }),
+        forecastAPI.summary(),
+        notificationsAPI.list(),
+        forecastAPI.topDeficits({ size: 5 }),
+      ]);
+
+      setIntelData({
+        expiry: expiryRes.status === 'fulfilled' ? expiryRes.value.data : null,
+        climate: climateRes.status === 'fulfilled' ? climateRes.value.data : null,
+        forecast: forecastRes.status === 'fulfilled' ? forecastRes.value.data : null,
+        notifications: notifRes.status === 'fulfilled'
+          ? (Array.isArray(notifRes.value.data) ? notifRes.value.data : [])
+          : [],
+      });
+
+      const deficitData = deficitRes.status === 'fulfilled'
+        ? (Array.isArray(deficitRes.value.data) ? deficitRes.value.data : deficitRes.value.data?.items || [])
+        : [];
+      setTopDeficits(deficitData);
     } catch (err) {
       console.error('Dashboard fetch error:', err);
     } finally {
@@ -97,6 +127,13 @@ export default function Dashboard() {
     return sorted;
   })();
 
+  // Forecast chart data
+  const forecastChartData = [
+    { name: 'Adequate', value: intelData.forecast?.ok_count || 0, fill: '#10B981' },
+    { name: 'Deficit', value: intelData.forecast?.deficit_count || 0, fill: '#F59E0B' },
+    { name: 'Critical', value: intelData.forecast?.critical_count || 0, fill: '#EF4444' },
+  ];
+
   // Custom tooltip for charts
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -104,7 +141,7 @@ export default function Dashboard() {
         <div className="bg-slate-800 border border-slate-600/50 rounded-lg p-3 shadow-xl">
           <p className="text-sm text-slate-300 font-medium">{label}</p>
           {payload.map((entry, idx) => (
-            <p key={idx} className="text-sm" style={{ color: entry.color }}>
+            <p key={idx} className="text-sm" style={{ color: entry.color || entry.fill }}>
               {entry.name}: {typeof entry.value === 'number' ? entry.value.toLocaleString() : entry.value}
             </p>
           ))}
@@ -193,8 +230,50 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* ── Intelligence Overview Cards ── */}
+      <div>
+        <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+          <Activity className="w-4 h-4 text-indigo-400" />
+          Intelligence Overview
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <SummaryCard
+            title="Expiry Alerts"
+            value={(intelData.expiry?.expired || 0) + (intelData.expiry?.urgent || 0) + (intelData.expiry?.warning || 0)}
+            icon={AlertTriangle}
+            color="red"
+            subtitle="Watchdog scan results"
+            highlight={!!(intelData.expiry?.expired || intelData.expiry?.urgent)}
+          />
+          <SummaryCard
+            title="Climate Risks"
+            value={(intelData.climate?.risk_summary?.critical || 0) + (intelData.climate?.risk_summary?.high || 0)}
+            icon={CloudSun}
+            color="amber"
+            subtitle="Storage at risk"
+            highlight={!!((intelData.climate?.risk_summary?.critical || 0) + (intelData.climate?.risk_summary?.high || 0))}
+          />
+          <SummaryCard
+            title="Demand Deficits"
+            value={intelData.forecast?.deficit_count || intelData.forecast?.total_deficit || 0}
+            icon={TrendingDown}
+            color="orange"
+            subtitle="Projected shortages"
+            highlight={!!(intelData.forecast?.deficit_count || intelData.forecast?.total_deficit)}
+          />
+          <SummaryCard
+            title="Notifications"
+            value={intelData.notifications?.filter(n => !n.is_read).length || 0}
+            icon={Activity}
+            color="blue"
+            subtitle="Unread alerts"
+            highlight={!!(intelData.notifications?.filter(n => !n.is_read).length)}
+          />
+        </div>
+      </div>
+
       {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Bar Chart - Stock by Shop */}
         <div className="bg-slate-900/80 border border-slate-700/50 rounded-xl p-6">
           <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
@@ -248,6 +327,38 @@ export default function Dashboard() {
           ) : (
             <div className="flex items-center justify-center h-[300px] text-slate-500 text-sm">
               No medicine data available
+            </div>
+          )}
+        </div>
+
+        {/* Bar Chart - Demand Forecast Breakdown */}
+        <div className="bg-slate-900/80 border border-slate-700/50 rounded-xl p-6">
+          <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+            <TrendingDown className="w-4 h-4 text-purple-400" />
+            Demand Forecast
+            {intelData.forecast?.avg_confidence != null && (
+              <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400 font-medium">
+                {(intelData.forecast.avg_confidence * 100).toFixed(0)}% conf.
+              </span>
+            )}
+          </h3>
+          {forecastChartData.some(d => d.value > 0) ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={forecastChartData} layout="vertical" margin={{ top: 5, right: 20, left: 60, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                <YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                <Tooltip content={<CustomTooltip />} />
+                <Bar dataKey="value" name="Items" radius={[0, 4, 4, 0]}>
+                  {forecastChartData.map((entry, idx) => (
+                    <Cell key={idx} fill={entry.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[300px] text-slate-500 text-sm">
+              No forecast data available
             </div>
           )}
         </div>
@@ -322,6 +433,74 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* ── Demand Forecast — Top Deficit Items ── */}
+      <div className="bg-slate-900/80 border border-slate-700/50 rounded-xl p-6">
+        <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+          <TrendingDown className="w-4 h-4 text-orange-400" />
+          Demand Forecast — Top Deficit Items
+          {intelData.forecast?.avg_confidence != null && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-400 font-medium">
+              {intelData.forecast.total_items || 0} items analyzed
+            </span>
+          )}
+        </h3>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="text-xs text-slate-400 uppercase tracking-wider">
+                <th className="text-left pb-3 px-3">Medicine</th>
+                <th className="text-left pb-3 px-3">Shop</th>
+                <th className="text-right pb-3 px-3">Current Stock</th>
+                <th className="text-right pb-3 px-3">Forecasted Demand</th>
+                <th className="text-right pb-3 px-3">Deficit</th>
+                <th className="text-right pb-3 px-3">Confidence</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/50">
+              {topDeficits.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-sm text-slate-500">
+                    No deficit items found
+                  </td>
+                </tr>
+              ) : (
+                topDeficits.map((item, idx) => {
+                  const deficit = (item.forecasted_demand || 0) - (item.current_stock || item.quantity || 0);
+                  return (
+                    <tr key={idx} className="hover:bg-slate-800/30 transition-colors">
+                      <td className="py-3 px-3 text-sm font-medium text-slate-200">
+                        {item.brand_name || item.medicine_name || item.salt_name || `#${item.med_id}`}
+                      </td>
+                      <td className="py-3 px-3 text-sm text-slate-400">
+                        {item.shop_name || `#${item.shop_id}`}
+                      </td>
+                      <td className="py-3 px-3 text-sm text-right text-slate-300 font-medium">
+                        {item.current_stock ?? item.quantity ?? '—'}
+                      </td>
+                      <td className="py-3 px-3 text-sm text-right text-slate-300">
+                        {item.forecasted_demand ?? item.predicted_demand ?? '—'}
+                      </td>
+                      <td className="py-3 px-3 text-sm text-right font-medium">
+                        <span className={deficit > 0 ? 'text-red-400' : 'text-emerald-400'}>
+                          {deficit > 0 ? `-${deficit}` : deficit === 0 ? '0' : `+${Math.abs(deficit)}`}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-sm text-right text-slate-400">
+                        {item.confidence != null
+                          ? `${(item.confidence * 100).toFixed(0)}%`
+                          : (item.avg_confidence != null
+                            ? `${(item.avg_confidence * 100).toFixed(0)}%`
+                            : '—')}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* Recent Activity / Inventory Table */}
       <div className="bg-slate-900/80 border border-slate-700/50 rounded-xl p-6">
         <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
@@ -373,6 +552,8 @@ function SummaryCard({ title, value, icon: Icon, color, subtitle, highlight }) {
     red: 'bg-red-500/10 text-red-400 border-red-500/20',
     amber: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
     emerald: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    orange: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+    blue: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
   };
 
   const iconColorMap = {
@@ -380,6 +561,8 @@ function SummaryCard({ title, value, icon: Icon, color, subtitle, highlight }) {
     red: 'bg-red-500/15 text-red-400',
     amber: 'bg-amber-500/15 text-amber-400',
     emerald: 'bg-emerald-500/15 text-emerald-400',
+    orange: 'bg-orange-500/15 text-orange-400',
+    blue: 'bg-blue-500/15 text-blue-400',
   };
 
   return (

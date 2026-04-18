@@ -329,35 +329,51 @@ def generate_forecasts(db: Session) -> list[dict]:
                 if r["stock_deficit"] > r["current_stock"] * 0.5
                 else NotificationSeverity.WARNING
             )
-            existing = db.execute(
-                select(Notification).where(
-                    and_(
-                        Notification.source == NotificationSource.DEMAND_FORECAST,
-                        Notification.resource_type == "demand_forecast",
-                        Notification.resource_id == r["med_id"],
-                        Notification.user_id == 1,  # admin
-                        Notification.is_read == False,
-                    )
-                )
-            ).scalar_one_or_none()
 
-            if not existing:
-                notif = Notification(
-                    user_id=1,
-                    title=f"Stock Deficit: {r['medicine_name']} at {r['shop_name']}",
-                    message=(
-                        f"Forecast predicts {r['total_predicted_demand_7d']} units needed in 7 days "
-                        f"but only {r['current_stock']} units in stock. "
-                        f"Deficit: {r['stock_deficit']} units. "
-                        f"Confidence: {r['confidence_score']:.0%}."
-                    ),
-                    severity=severity,
-                    source=NotificationSource.DEMAND_FORECAST,
-                    resource_type="demand_forecast",
-                    resource_id=r["med_id"],
-                    action_url=f"/inventory?shop_id={r['shop_id']}&med_id={r['med_id']}",
-                )
-                db.add(notif)
+            # Query shop staff for this shop (same pattern as expiry_watchdog)
+            from app.models.shop_staff import ShopStaff
+
+            staff_rows = db.execute(
+                select(ShopStaff.user_id).where(ShopStaff.shop_id == r["shop_id"])
+            ).all()
+            staff_user_ids = [row[0] for row in staff_rows]
+
+            if not staff_user_ids:
+                continue  # No staff assigned — skip notification
+
+            notif_title = f"Stock Deficit: {r['medicine_name']} at {r['shop_name']}"
+            notif_message = (
+                f"Forecast predicts {r['total_predicted_demand_7d']} units needed in 7 days "
+                f"but only {r['current_stock']} units in stock. "
+                f"Deficit: {r['stock_deficit']} units. "
+                f"Confidence: {r['confidence_score']:.0%}."
+            )
+
+            for uid in staff_user_ids:
+                existing = db.execute(
+                    select(Notification).where(
+                        and_(
+                            Notification.source == NotificationSource.DEMAND_FORECAST,
+                            Notification.resource_type == "demand_forecast",
+                            Notification.resource_id == r["med_id"],
+                            Notification.user_id == uid,
+                            Notification.is_read == False,
+                        )
+                    )
+                ).scalar_one_or_none()
+
+                if not existing:
+                    notif = Notification(
+                        user_id=uid,
+                        title=notif_title,
+                        message=notif_message,
+                        severity=severity,
+                        source=NotificationSource.DEMAND_FORECAST,
+                        resource_type="demand_forecast",
+                        resource_id=r["med_id"],
+                        action_url=f"/inventory?shop_id={r['shop_id']}&med_id={r['med_id']}",
+                    )
+                    db.add(notif)
 
     db.commit()
     return results

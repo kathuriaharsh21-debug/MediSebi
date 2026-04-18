@@ -111,12 +111,9 @@ export default function ClimatePage() {
   // Disease breakdown chart data
   const diseaseChartData = useMemo(() => {
     if (!dashboard?.disease_breakdown) return [];
-    return dashboard.disease_breakdown.map((d) => ({
+    return (dashboard.disease_breakdown || []).map((d) => ({
       name: d.disease || d.name || 'Unknown',
-      critical: d.critical || d.CRITICAL || 0,
-      high: d.high || d.HIGH || 0,
-      moderate: d.moderate || d.MODERATE || 0,
-      low: d.low || d.LOW || 0,
+      alerts: d.alert_count || d.count || 0,
     }));
   }, [dashboard]);
 
@@ -230,10 +227,7 @@ export default function ClimatePage() {
               <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} angle={-20} textAnchor="end" height={60} />
               <YAxis tick={{ fill: '#94a3b8', fontSize: 12 }} />
               <Tooltip content={<CustomTooltip />} />
-              <Bar dataKey="critical" name="Critical" fill="#EF4444" radius={[2, 2, 0, 0]} />
-              <Bar dataKey="high" name="High" fill="#F97316" radius={[2, 2, 0, 0]} />
-              <Bar dataKey="moderate" name="Moderate" fill="#3B82F6" radius={[2, 2, 0, 0]} />
-              <Bar dataKey="low" name="Low" fill="#10B981" radius={[2, 2, 0, 0]} />
+              <Bar dataKey="alerts" name="Alerts" fill="#F97316" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         ) : (
@@ -286,17 +280,17 @@ export default function ClimatePage() {
                       <td className="px-4 py-3 text-sm text-slate-400">
                         <span className="inline-flex items-center gap-1">
                           <Thermometer className="w-3.5 h-3.5 text-red-400" />
-                          {alert.temperature ?? alert.temp ?? '—'}°C
+                          {alert.temperature_c ?? alert.temperature ?? '—'}°C
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-400">
                         <span className="inline-flex items-center gap-1">
                           <Droplets className="w-3.5 h-3.5 text-blue-400" />
-                          {alert.humidity ?? '—'}%
+                          {alert.humidity_pct ?? alert.humidity ?? '—'}%
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-300">
-                        {alert.disease || alert.disease_name || '—'}
+                        {alert.disease_risk || alert.disease || '—'}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${riskStyle}`}>
@@ -406,10 +400,14 @@ export default function ClimatePage() {
                 <span className="text-xs font-medium text-slate-400 uppercase">Temperature</span>
               </div>
               <p className="text-2xl font-bold text-white">
-                {shopWeather.temperature ?? shopWeather.temp ?? '—'}°C
+                {shopWeather.weather?.temperature_c ?? shopWeather.temperature ?? '—'}°C
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                Feels like {shopWeather.feels_like ?? '—'}°C
+                {shopWeather.weather?.weather_condition
+                  ? `Condition: ${shopWeather.weather.weather_condition}`
+                  : shopWeather.weather?.data_source
+                    ? `Source: ${shopWeather.weather.data_source}`
+                    : '—'}
               </p>
             </div>
 
@@ -420,10 +418,14 @@ export default function ClimatePage() {
                 <span className="text-xs font-medium text-slate-400 uppercase">Humidity</span>
               </div>
               <p className="text-2xl font-bold text-white">
-                {shopWeather.humidity ?? '—'}%
+                {shopWeather.weather?.humidity_pct ?? shopWeather.humidity ?? '—'}%
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                {shopWeather.humidity >= 70 ? 'High humidity zone' : shopWeather.humidity >= 40 ? 'Comfortable range' : 'Low humidity'}
+                {(shopWeather.weather?.humidity_pct ?? shopWeather.humidity) >= 70
+                  ? 'High humidity zone'
+                  : (shopWeather.weather?.humidity_pct ?? shopWeather.humidity) >= 40
+                    ? 'Comfortable range'
+                    : 'Low humidity'}
               </p>
             </div>
 
@@ -434,10 +436,10 @@ export default function ClimatePage() {
                 <span className="text-xs font-medium text-slate-400 uppercase">Condition</span>
               </div>
               <p className="text-lg font-bold text-white">
-                {shopWeather.condition || shopWeather.weather || '—'}
+                {shopWeather.weather?.weather_condition ?? shopWeather.condition ?? '—'}
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                {shopWeather.wind_speed ? `Wind: ${shopWeather.wind_speed} km/h` : shopWeather.description || 'No additional info'}
+                {shopWeather.weather?.data_source || shopWeather.city ? `📍 ${shopWeather.city || shopWeather.weather?.data_source || '—'}` : 'No additional info'}
               </p>
             </div>
 
