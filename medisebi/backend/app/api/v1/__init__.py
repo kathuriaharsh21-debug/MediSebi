@@ -16,6 +16,8 @@ from app.api.v1.expiry import router as expiry_router
 from app.api.v1.climate import router as climate_router
 from app.api.v1.transfers import router as transfers_router
 from app.api.v1.forecast import router as forecast_router
+from app.api.v1.catalog import router as catalog_router
+from app.api.v1.marketplace import router as marketplace_router
 
 api_router = APIRouter()
 
@@ -30,3 +32,5 @@ api_router.include_router(expiry_router, prefix="/expiry", tags=["Expiry Watchdo
 api_router.include_router(climate_router, prefix="/climate", tags=["Climate Intelligence"])
 api_router.include_router(transfers_router, prefix="/transfers", tags=["Redistribution"])
 api_router.include_router(forecast_router, prefix="/forecast", tags=["Demand Forecast"])
+api_router.include_router(catalog_router, prefix="/catalog", tags=["Medicine Catalog"])
+api_router.include_router(marketplace_router, prefix="/marketplace", tags=["Marketplace"])
