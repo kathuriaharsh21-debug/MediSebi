@@ -7,10 +7,14 @@ Admin and Pharmacist roles can perform write operations.
 """
 
 import json
+import subprocess
+import tempfile
+import os
 from datetime import datetime, timezone, date, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
+from pydantic import BaseModel
 from sqlalchemy import select, func, update
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -33,6 +37,20 @@ from app.schemas.inventory import (
 )
 
 router = APIRouter(tags=["Inventory"])
+
+
+# ── SCHEMA: Medicine scan result ──────────────────────
+class MedicineScanResponse(BaseModel):
+    brand_name: str | None = None
+    salt_name: str | None = None
+    manufacturer: str | None = None
+    strength: str | None = None
+    dosage_form: str | None = None
+    batch_number: str | None = None
+    expiry_date: str | None = None
+    quantity: int | None = None
+    mrp: float | None = None
+    confidence: str = "extracted"  # or "partial" if many nulls
 
 
 def _create_audit_log(
@@ -194,6 +212,131 @@ def get_low_stock_items(
                 resp.__dict__["_alert_level"] = "warning"
         response_items.append(resp)
     return InventoryListResponse(items=response_items, total=total, page=page, size=size)
+
+
+# ── SCAN MEDICINE FROM PHOTO ──────────────────────────────
+@router.post("/scan-medicine", summary="Scan medicine from photo")
+async def scan_medicine_from_photo(
+    file: UploadFile = File(..., description="Photo of medicine packaging"),
+    current_user: User = Depends(get_current_user),
+) -> MedicineScanResponse:
+    """
+    Upload a photo of medicine packaging to auto-extract medicine details.
+    Uses AI vision model to identify brand name, salt/active ingredient,
+    batch number, expiry date, manufacturer, dosage form, and strength.
+
+    Returns structured data that can be used to pre-fill the Add Stock form.
+    """
+    # Validate file is an image
+    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp"}
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid file type '{file.content_type}'. Only image files are accepted.",
+        )
+
+    # Save uploaded file to a temp directory
+    tmp_dir = tempfile.mkdtemp()
+    image_path = os.path.join(tmp_dir, file.filename or "scan_image.jpg")
+    result_path = os.path.join(tmp_dir, "scan_result.json")
+
+    try:
+        contents = await file.read()
+        with open(image_path, "wb") as f:
+            f.write(contents)
+
+        # Build the vision prompt
+        prompt = (
+            'You are a pharmacy assistant AI. Analyze this medicine packaging photo '
+            'and extract the following information. Return ONLY valid JSON with these fields:\n'
+            '- brand_name: The brand/product name (e.g., "Crocin 500mg", "Calpol 500mg")\n'
+            '- salt_name: The active pharmaceutical ingredient / salt (e.g., "Paracetamol", "Amoxicillin")\n'
+            '- manufacturer: The manufacturer/company name\n'
+            '- strength: The strength/dosage (e.g., "500mg", "650mg")\n'
+            '- dosage_form: The form (e.g., "Tablet", "Capsule", "Syrup", "Powder", "Injection")\n'
+            '- batch_number: The batch/lot number if visible\n'
+            '- expiry_date: The expiry date in YYYY-MM-DD format if visible\n'
+            '- quantity: The quantity per pack if visible (e.g., 10, 15, 30)\n'
+            '- mrp: The MRP/price if visible\n\n'
+            'If a field is not visible or cannot be determined, use null. Be as accurate as possible. '
+            'Only return JSON, no other text.'
+        )
+
+        # Run z-ai vision CLI
+        cmd = ["z-ai", "vision", "-p", prompt, "-i", image_path, "-o", result_path]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
+        if proc.returncode != 0:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Vision analysis failed: {proc.stderr.strip() or 'Unknown error'}",
+            )
+
+        # Read the result JSON
+        if not os.path.exists(result_path):
+            # CLI succeeded but no output file — try to parse stdout
+            raw = proc.stdout.strip()
+            if not raw:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Vision analysis returned no output.",
+                )
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                return MedicineScanResponse(confidence="low")
+        else:
+            with open(result_path, "r") as f:
+                raw = f.read()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                # JSON parsing failed — return partial
+                return MedicineScanResponse(confidence="low")
+
+        # Build response, mapping z-ai output fields to our schema
+        null_count = sum(1 for v in data.values() if v is None)
+        confidence = "partial" if null_count >= 5 else "extracted"
+
+        return MedicineScanResponse(
+            brand_name=data.get("brand_name"),
+            salt_name=data.get("salt_name"),
+            manufacturer=data.get("manufacturer"),
+            strength=data.get("strength"),
+            dosage_form=data.get("dosage_form"),
+            batch_number=data.get("batch_number"),
+            expiry_date=data.get("expiry_date"),
+            quantity=data.get("quantity"),
+            mrp=data.get("mrp"),
+            confidence=confidence,
+        )
+
+    except HTTPException:
+        raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Vision analysis timed out. Please try again with a clearer image.",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing image: {str(exc)}",
+        )
+    finally:
+        # Clean up temp files
+        try:
+            os.remove(image_path)
+        except OSError:
+            pass
+        try:
+            os.remove(result_path)
+        except OSError:
+            pass
+        try:
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
 
 
 # ── GET BY ID ─────────────────────────────────────────────────

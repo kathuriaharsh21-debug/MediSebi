@@ -124,6 +124,13 @@ export const inventoryAPI = {
   update: (id, data) => api.put(`/inventory/${id}`, data),
   expiringAlerts: (params = {}) => api.get('/inventory/alerts/expiring', { params }),
   lowStockAlerts: (params = {}) => api.get('/inventory/alerts/low-stock', { params }),
+  scanMedicine: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/inventory/scan-medicine', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 // ─── Substitution ──────────────────────────────────

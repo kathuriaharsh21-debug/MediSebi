@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Package, Search, Filter, Plus, X, Loader2, AlertTriangle,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Camera, Upload,
 } from 'lucide-react';
 import { inventoryAPI, shopsAPI, medicinesAPI } from '../services/api';
 
@@ -23,7 +23,16 @@ export default function InventoryPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [addError, setAddError] = useState('');
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanImage, setScanImage] = useState(null);
+  const [scanImagePreview, setScanImagePreview] = useState(null);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
+  const [scanError, setScanError] = useState('');
   const pageSize = 20;
+
+  const cameraRef = useRef(null);
+  const fileRef = useRef(null);
 
   useEffect(() => {
     fetchShops();
@@ -119,6 +128,63 @@ export default function InventoryPage() {
     }
   };
 
+  const handleScanImageSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setScanError('Please select an image file');
+      return;
+    }
+    setScanImage(file);
+    setScanError('');
+    const reader = new FileReader();
+    reader.onload = () => setScanImagePreview(reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleScanSubmit = async () => {
+    if (!scanImage) return;
+    setScanLoading(true);
+    setScanError('');
+    setScanResult(null);
+    try {
+      const { data } = await inventoryAPI.scanMedicine(scanImage);
+      setScanResult(data);
+      // Auto-fill the add form with scanned data
+      if (data.brand_name || data.salt_name) {
+        setAddForm(prev => ({
+          ...prev,
+          batch_number: data.batch_number || prev.batch_number,
+          expiry_date: data.expiry_date || prev.expiry_date,
+          quantity: data.quantity ? String(data.quantity) : prev.quantity,
+          selling_price: data.mrp ? String(data.mrp) : prev.selling_price,
+        }));
+      }
+    } catch (err) {
+      setScanError(err.response?.data?.detail || 'Failed to analyze image. Please try again.');
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  const handleScanUseData = () => {
+    setShowScanModal(false);
+    // Reset scan state
+    setScanImage(null);
+    setScanImagePreview(null);
+    setScanResult(null);
+    setScanError('');
+    // Open add modal with pre-filled data
+    setShowAddModal(true);
+  };
+
+  const resetScan = () => {
+    setScanImage(null);
+    setScanImagePreview(null);
+    setScanResult(null);
+    setScanError('');
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -130,13 +196,22 @@ export default function InventoryPage() {
           </h1>
           <p className="text-sm text-slate-400 mt-1">Track stock levels, expiry dates, and pricing</p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-indigo-600/20"
-        >
-          <Plus className="w-4 h-4" />
-          Add Stock
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => { resetScan(); setShowScanModal(true); }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-emerald-600/20"
+          >
+            <Camera className="w-4 h-4" />
+            Scan Medicine
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-indigo-600/20"
+          >
+            <Plus className="w-4 h-4" />
+            Add Stock
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -423,6 +498,171 @@ export default function InventoryPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Scan Medicine Modal */}
+      {showScanModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowScanModal(false)} />
+          <div className="relative bg-slate-900 border border-slate-700/50 rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Camera className="w-5 h-5 text-emerald-400" />
+                Scan Medicine Packaging
+              </h2>
+              <button onClick={() => setShowScanModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Hidden file inputs */}
+            <input type="file" accept="image/*" capture="environment" onChange={handleScanImageSelect} className="hidden" ref={cameraRef} />
+            <input type="file" accept="image/*" onChange={handleScanImageSelect} className="hidden" ref={fileRef} />
+
+            {/* Source selection buttons */}
+            {!scanImagePreview && !scanLoading && (
+              <div className="space-y-3 mb-4">
+                <p className="text-sm text-slate-400">Capture or upload a photo of the medicine packaging to automatically extract details.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => cameraRef.current?.click()}
+                    className="flex flex-col items-center gap-2 p-4 bg-slate-800/80 border border-slate-600/50 rounded-xl hover:border-emerald-500/50 hover:bg-slate-800 transition-all"
+                  >
+                    <Camera className="w-6 h-6 text-emerald-400" />
+                    <span className="text-sm font-medium text-slate-300">Camera</span>
+                    <span className="text-[11px] text-slate-500">Take a photo</span>
+                  </button>
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    className="flex flex-col items-center gap-2 p-4 bg-slate-800/80 border border-slate-600/50 rounded-xl hover:border-emerald-500/50 hover:bg-slate-800 transition-all"
+                  >
+                    <Upload className="w-6 h-6 text-emerald-400" />
+                    <span className="text-sm font-medium text-slate-300">Upload</span>
+                    <span className="text-[11px] text-slate-500">Choose a file</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Image preview area */}
+            {scanImagePreview && !scanLoading && (
+              <div className="mb-4">
+                <div className={`relative rounded-xl overflow-hidden border-2 border-dashed ${scanResult ? 'border-emerald-500/50' : 'border-slate-600/50'} transition-colors`}>
+                  <img
+                    src={scanImagePreview}
+                    alt="Scanned medicine packaging"
+                    className="w-full max-h-64 object-contain bg-slate-800/60"
+                  />
+                  {!scanResult && (
+                    <button
+                      onClick={() => fileRef.current?.click()}
+                      className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 hover:opacity-100 transition-opacity"
+                    >
+                      <span className="px-3 py-1.5 bg-slate-900/90 text-sm text-slate-300 rounded-lg">Change Image</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Loading state */}
+            {scanLoading && (
+              <div className="flex flex-col items-center gap-3 py-8">
+                <div className="relative">
+                  <Loader2 className="w-10 h-10 text-emerald-400 animate-spin" />
+                  <Camera className="w-5 h-5 text-emerald-300 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                </div>
+                <p className="text-sm text-slate-400">Analyzing medicine packaging...</p>
+              </div>
+            )}
+
+            {/* Error display */}
+            {scanError && (
+              <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                <p className="text-sm text-red-400 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  {scanError}
+                </p>
+              </div>
+            )}
+
+            {/* Extracted results */}
+            {scanResult && (
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-medium text-emerald-400">Extracted Information</h3>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                    scanResult.confidence === 'high'
+                      ? 'bg-emerald-500/10 text-emerald-400'
+                      : scanResult.confidence === 'partial'
+                        ? 'bg-amber-500/10 text-amber-400'
+                        : 'bg-red-500/10 text-red-400'
+                  }`}>
+                    {scanResult.confidence === 'high' ? '✓ Extracted' : scanResult.confidence === 'partial' ? '~ Partial' : '⚠ Low confidence'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    ['Brand Name', scanResult.brand_name],
+                    ['Salt / Active Ingredient', scanResult.salt_name],
+                    ['Manufacturer', scanResult.manufacturer],
+                    ['Strength', scanResult.strength],
+                    ['Dosage Form', scanResult.dosage_form],
+                    ['Batch Number', scanResult.batch_number],
+                    ['Expiry Date', scanResult.expiry_date],
+                    ['Quantity', scanResult.quantity],
+                    ['MRP', scanResult.mrp ? `₹${scanResult.mrp}` : null],
+                  ].map(([label, value]) => (
+                    <div key={label} className="bg-slate-800/60 rounded-lg p-3">
+                      <p className="text-[11px] text-slate-500 uppercase tracking-wider">{label}</p>
+                      <p className="text-sm font-medium text-slate-200 mt-0.5">
+                        {value || <span className="text-slate-600 italic">Not detected</span>}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex justify-end gap-3 pt-5 mt-4 border-t border-slate-800/50">
+              {scanResult ? (
+                <>
+                  <button
+                    onClick={resetScan}
+                    className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors"
+                  >
+                    Try Again
+                  </button>
+                  <button
+                    onClick={handleScanUseData}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors"
+                  >
+                    Use This Data
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setShowScanModal(false)}
+                    className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  {scanImagePreview && !scanLoading && (
+                    <button
+                      onClick={handleScanSubmit}
+                      disabled={scanLoading}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-600/50 text-white text-sm font-medium rounded-lg transition-colors"
+                    >
+                      <Camera className="w-4 h-4" />
+                      Analyze
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
