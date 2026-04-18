@@ -132,4 +132,74 @@ export const substitutionAPI = {
     api.post('/substitution/find-alternatives', { med_id: medId, shop_id: shopId }),
 };
 
+// ─── Expiry Watchdog ──────────────────────────
+export const expiryAPI = {
+  scan: () => api.get('/expiry/scan'),
+  summary: () => api.get('/expiry/summary'),
+  items: (params = {}) => api.get('/expiry/items', { params }),
+  shopStatus: (shopId) => api.get(`/expiry/shop/${shopId}`),
+  byCategory: () => api.get('/expiry/stats/by-category'),
+};
+
+// ─── Climate Intelligence ─────────────────────
+export const climateAPI = {
+  scan: () => api.get('/climate/scan'),
+  shopAlerts: (shopId) => api.get(`/climate/shop/${shopId}`),
+  dashboard: (params = {}) => api.get('/climate/dashboard', { params }),
+  shopWeather: (shopId) => api.get(`/climate/weather/${shopId}`),
+};
+
+// ─── Demand Forecast ──────────────────────────
+export const forecastAPI = {
+  generate: () => api.post('/forecast/generate'),
+  summary: () => api.get('/forecast/summary'),
+  items: (params = {}) => api.get('/forecast/items', { params }),
+  topDeficits: (params = {}) => api.get('/forecast/top-deficits', { params }),
+  demandTrend: (medId, shopId) => api.get('/forecast/charts/demand-trend', { params: { med_id: medId, shop_id: shopId } }),
+};
+
+// ─── Transfers / Redistribution ───────────────
+export const transfersAPI = {
+  analyze: () => api.get('/transfers/analyze'),
+  analyzeShop: (shopId) => api.get(`/transfers/analyze/shop/${shopId}`),
+  list: (params = {}) => api.get('/transfers/', { params }),
+  get: (id) => api.get(`/transfers/${id}`),
+  create: (data) => api.post('/transfers/request', data),
+  approve: (id) => api.put(`/transfers/${id}/approve`),
+  execute: (id) => api.put(`/transfers/${id}/execute`),
+  reject: (id, data) => api.put(`/transfers/${id}/reject`, data),
+  analytics: () => api.get('/transfers/analytics'),
+  shopHistory: (shopId, params = {}) => api.get(`/transfers/shop/${shopId}/history`, { params }),
+};
+
+// ─── Marketplace ──────────────────────────────
+export const marketplaceAPI = {
+  expiringListings: (params = {}) => api.get('/marketplace/expiring-listings', { params }),
+  demandMatches: () => api.get('/marketplace/demand-matches'),
+  createOffer: (data) => api.post('/marketplace/create-offer', data),
+  listOffers: (params = {}) => api.get('/marketplace/offers', { params }),
+  acceptOffer: (id) => api.put(`/marketplace/offers/${id}/accept`),
+  rejectOffer: (id, data) => api.put(`/marketplace/offers/${id}/reject`, data),
+  completeOffer: (id) => api.put(`/marketplace/offers/${id}/complete`),
+  dashboard: () => api.get('/marketplace/dashboard'),
+  shopListings: (shopId) => api.get(`/marketplace/shop/${shopId}/listings`),
+  shopOpportunities: (shopId) => api.get(`/marketplace/shop/${shopId}/opportunities`),
+};
+
+// ─── Catalog ─────────────────────────────────
+export const catalogAPI = {
+  browse: (params = {}) => api.get('/catalog/', { params }),
+  search: (params = {}) => api.get('/catalog/search', { params }),
+  categories: () => api.get('/catalog/categories'),
+  get: (index) => api.get(`/catalog/${index}`),
+  quickAdd: (data) => api.post('/catalog/quick-add', data),
+  bulkAdd: (data) => api.post('/catalog/bulk-add', data),
+  stockCheck: (shopId) => api.get(`/catalog/stock-check/${shopId}`),
+};
+
+// ─── Notifications ────────────────────────────
+export const notificationsAPI = {
+  list: () => api.get('/notifications/'),
+};
+
 export default api;

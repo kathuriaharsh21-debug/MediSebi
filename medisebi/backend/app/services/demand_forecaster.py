@@ -211,7 +211,7 @@ def generate_forecasts(db: Session) -> list[dict]:
     """
     from app.models import (
         Inventory, Shop, Medicine, Salt, DemandForecast,
-        Notification, NotificationSeverity, NotificationSource, NotificationSource as NS,
+        Notification, NotificationSeverity, NotificationSource,
     )
     from app.core.config import settings
 

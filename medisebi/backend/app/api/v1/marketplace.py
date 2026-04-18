@@ -324,21 +324,15 @@ def get_expiring_listings(
     return results
 
 
-# ── GET /marketplace/demand-matches ────────────────────────────
+# ── Demand Match Logic ───────────────────────────────────────
 
-@router.get(
-    "/demand-matches",
-    response_model=list[DemandMatchItem],
-    summary="Find shops that need expiring medicines",
-)
-def get_demand_matches(
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-):
+def _compute_demand_matches(db: Session) -> list[DemandMatchItem]:
     """
-    Find demand matches: expiring medicines that other shops need.
+    Core logic: find demand matches (expiring medicines that other shops need).
     For each expiring item, find shops whose inventory of the same salt
     is below reorder_level.
+    Extracted as a standalone helper so it can be reused by both the
+    /demand-matches endpoint and the dashboard without __wrapped__ hacks.
     """
     expiring_items = _get_expiring_items(db, days=60)
 
@@ -417,6 +411,19 @@ def get_demand_matches(
     matches.sort(key=lambda m: m.priority_score, reverse=True)
 
     return matches
+
+
+@router.get(
+    "/demand-matches",
+    response_model=list[DemandMatchItem],
+    summary="Find shops that need expiring medicines",
+)
+def get_demand_matches(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Find demand matches: expiring medicines that other shops need."""
+    return _compute_demand_matches(db)
 
 
 # ── POST /marketplace/create-offer ─────────────────────────────
@@ -1040,7 +1047,7 @@ def marketplace_dashboard(
     expiring_items = _get_expiring_items(db, days=60)
 
     # Count demand matches (reuse logic)
-    demand_matches_data = get_demand_matches.__wrapped__(db, current_user)
+    demand_matches_data = _compute_demand_matches(db)
 
     # Count offers by status
     all_offers = db.execute(
@@ -1187,7 +1194,7 @@ def shop_opportunities(
         )
 
     # Get all demand matches and filter for this shop
-    all_matches = get_demand_matches.__wrapped__(db, current_user)
+    all_matches = _compute_demand_matches(db)
 
     # Filter: only matches where dest_shop_id matches
     return [m for m in all_matches if m.dest_shop_id == shop_id]

@@ -101,7 +101,7 @@ async def list_forecast_items(
         )
 
     # Count total
-    count_query = query.with_only_columns(func.count()).order_by(None)
+    count_query = select(func.count()).select_from(query.subquery())
     total = db.execute(count_query).scalar() or 0
 
     # Sort by deficit descending

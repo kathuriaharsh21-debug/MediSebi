@@ -1,25 +1,30 @@
 """
 MediSebi — Enhanced Database Seed Script
 ==========================================
-Creates a realistic demo dataset with:
-  - 5 Users (admin + 4 pharmacists across cities)
-  - 40+ Salts (unique APIs from the medicine catalog)
-  - 55 Medicines (brand-name products from MEDICINE_CATALOG)
-  - 8 Shops (pharmacies across Mumbai, Delhi, Bangalore, Chennai, Kolkata)
-  - 250+ Inventory entries (realistic stock levels with variety)
-  - Shop-Staff assignments linking pharmacists to their cities
+Comprehensive seed data for development, testing, and AI feature validation.
 
-Features:
-  - Idempotent: safe to run multiple times (checks for duplicates)
-  - Deterministic: uses per-city random seeds for reproducible results
-  - Realistic: includes expired items, low-stock items, and varied expiry dates
+Creates:
+  - 2 Users (admin + pharmacist) with bcrypt-hashed passwords
+  - 20+ Salts (unique active pharmaceutical ingredients from catalog)
+  - 35 Medicines (diverse brands across all therapeutic categories)
+  - 8 Shops (pharmacies across 5 Indian cities from DEMO_STORES)
+  - 120+ Inventory entries with:
+      * Varied expiry dates (expired, 7-day, 30-day, safe 6+ months)
+      * Varied quantities (excess, adequate, low, critical, deficit)
+      * Redistribution-ready (excess in some shops, deficit in others)
+  - 16 Shop-Staff assignments (both users assigned across all shops)
+
+Drops and recreates all tables from scratch — use with caution!
+
+Usage:
+    cd /home/z/my-project/medisebi/backend
+    python seed_enhanced.py
 """
 
 import sys
 import os
 import random
-import hashlib
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 # ── Ensure the backend directory is on sys.path ──────────────────
 backend_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,467 +32,716 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 import bcrypt
-from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base, get_engine
-from app.models.user import User, UserRole
-from app.models.salt import Salt, ABCClass
-from app.models.medicine import Medicine
-from app.models.shop import Shop
-from app.models.inventory import Inventory
-from app.models.shop_staff import ShopStaff
+from app.models import (
+    User, UserRole,
+    Salt, ABCClass,
+    Medicine,
+    Shop,
+    Inventory,
+    ShopStaff,
+)
 from app.core.medicine_catalog import MEDICINE_CATALOG, DEMO_STORES
 
 # ── Database Setup (uses same engine as the app) ─────────────────
 engine = get_engine()
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
+# ── Reproducible randomness ──────────────────────────────────────
+random.seed(42)
+
+# ── Reference date for expiry calculations ───────────────────────
+TODAY = date.today()
+
+# ──────────────────────────────────────────────────────────────────
+# HELPER FUNCTIONS
+# ──────────────────────────────────────────────────────────────────
 
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt with 12 rounds."""
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
 
-# ── Constants ─────────────────────────────────────────────────────
-ABC_CLASS_MAP = {
-    "A": ABCClass.A,
-    "B": ABCClass.B,
-    "C": ABCClass.C,
-}
+def expiry_offset(days: int) -> date:
+    """Return a date `days` from today."""
+    return TODAY + timedelta(days=days)
 
-# Shop classification: central shops get higher stock
-CENTRAL_CODES = {"PH-CEN-001", "PH-WST-002", "PH-NRT-003", "PH-STH-004", "PH-KOR-005"}
-PERIPHERAL_CODES = {"PH-WHT-006", "PH-TNG-007", "PH-SLK-008"}
 
-# City → pharmacist mapping
-CITY_PHARMACIST_MAP = {
-    "Mumbai": "pharmacist1",
-    "Delhi": "pharmacist2",
-    "Bangalore": "pharmacist3",
-}
+def random_expiry_bucket() -> date:
+    """Return a random expiry date in one of four buckets."""
+    bucket = random.choices(
+        ["expired", "7day", "30day", "safe"],
+        weights=[10, 15, 15, 60],  # ~60% safe stock
+        k=1,
+    )[0]
+    if bucket == "expired":
+        return expiry_offset(-random.randint(10, 200))
+    elif bucket == "7day":
+        return expiry_offset(random.randint(1, 7))
+    elif bucket == "30day":
+        return expiry_offset(random.randint(8, 30))
+    else:
+        return expiry_offset(random.randint(180, 730))
 
-# Chennai + Kolkata share pharmacist4
-EXTRA_CITY_PHARMACIST_MAP = {
-    "Chennai": "pharmacist4",
-    "Kolkata": "pharmacist4",
-}
 
-# Seed data for users
-USERS_DATA = [
-    {
-        "username": "admin",
-        "email": "admin@medisebi.com",
-        "password": "Admin@12345!",
-        "full_name": "System Administrator",
-        "role": UserRole.ADMIN,
-    },
-    {
-        "username": "pharmacist1",
-        "email": "pharmacist1@medisebi.com",
-        "password": "Pharm@12345!",
-        "full_name": "Dr. Priya Sharma",
-        "role": UserRole.PHARMACIST,
-    },
-    {
-        "username": "pharmacist2",
-        "email": "pharmacist2@medisebi.com",
-        "password": "Pharm2@12345!",
-        "full_name": "Dr. Rajesh Gupta",
-        "role": UserRole.PHARMACIST,
-    },
-    {
-        "username": "pharmacist3",
-        "email": "pharmacist3@medisebi.com",
-        "password": "Pharm3@12345!",
-        "full_name": "Dr. Anitha Reddy",
-        "role": UserRole.PHARMACIST,
-    },
-    {
-        "username": "pharmacist4",
-        "email": "pharmacist4@medisebi.com",
-        "password": "Pharm4@12345!",
-        "full_name": "Dr. Suresh Menon",
-        "role": UserRole.PHARMACIST,
-    },
+# ──────────────────────────────────────────────────────────────────
+# DATA SELECTION FROM CATALOG
+# ──────────────────────────────────────────────────────────────────
+
+# 35 medicines selected for broad category coverage
+SELECTED_MEDICINE_NAMES = [
+    # Analgesics & Antipyretics (7)
+    "Dolo 650",
+    "Crocin Advance",
+    "Calpol 500",
+    "Combiflam",
+    "Brufen 400",
+    "Voveran 50",
+    "Nise 100",
+    # Antibiotics (5)
+    "Augmentin 625",
+    "Mox 500",
+    "Azithral 500",
+    "Ciplox 500",
+    "Doxy 100",
+    # Anti-allergic (2)
+    "Cetzine",
+    "Allegra 120",
+    # Cough & Cold (2)
+    "Benadryl",
+    "Vicks Action 500",
+    # Gastrointestinal + ORS (4)
+    "Pan 40",
+    "Imodium",
+    "ORS Electral",
+    "Econorm",
+    # Vitamins & Supplements (4)
+    "Limcee",
+    "Shelcal 500",
+    "Becosules",
+    "Zincovit",
+    # Antidiabetic (3)
+    "Glycomet 500",
+    "Glimepiride 2",
+    "Human Mixtard 30/70",
+    # Antihypertensive (3)
+    "Telma 40",
+    "Amlong 5",
+    "Atorva 10",
+    # Dermatology (3)
+    "Betadine",
+    "Candid-B",
+    "Soframycin",
+    # Ophthalmology (1)
+    "Refresh Tears",
+    # Anti-inflammatory (1)
+    "Etorica 90",
+    # Antispasmodic (1)
+    "Cyclopam",
+    # Antiemetic (1)
+    "Emset 4",
 ]
 
+# Build lookup: brand_name → catalog entry
+CATALOG_MAP = {m["brand_name"]: m for m in MEDICINE_CATALOG}
 
-def derive_batch_prefix(brand_name: str, manufacturer: str) -> str:
-    """Derive a short batch prefix from brand name + manufacturer."""
-    # Take first 3 alpha chars from brand name, uppercase
-    chars = [c.upper() for c in brand_name if c.isalpha()]
-    prefix = "".join(chars[:3])
-    # Pad to 3 chars if needed
-    while len(prefix) < 3:
-        prefix += "X"
-    return prefix[:3]
+# Extract unique salts from selected medicines
+SELECTED_CATALOG = [CATALOG_MAP[name] for name in SELECTED_MEDICINE_NAMES]
+
+UNIQUE_SALTS = {}
+for med in SELECTED_CATALOG:
+    sn = med["salt_name"]
+    if sn not in UNIQUE_SALTS:
+        UNIQUE_SALTS[sn] = {
+            "formula_name": sn,
+            "category": med["category"],
+            "abc_class": med["abc_class"],
+            "reorder_level": med["reorder"],
+            "safety_stock": med["safety_stock"],
+            "critical_threshold": med["critical"],
+            "warning_threshold": int(med["reorder"] * 0.75),
+            "dosage_form": med["form"],
+            "standard_strength": med["strength"],
+            "unit_of_measure": "units",
+        }
 
 
-def generate_batch_number(prefix: str, seed_val: int, year: int = 2025) -> str:
-    """Generate a deterministic batch number."""
-    batch_id = (seed_val % 999) + 1
-    return f"{prefix}-{year}-{batch_id:03d}"
+# ──────────────────────────────────────────────────────────────────
+# INVENTORY DISTRIBUTION STRATEGY
+# ──────────────────────────────────────────────────────────────────
+# Each medicine is assigned to 3-4 shops with intentional quantity
+# variation to enable redistribution engine testing:
+#   - excess:  300-600 units (well above reorder level)
+#   - adequate: 100-250 units (above reorder level)
+#   - low:      20-80 units (below reorder, above critical)
+#   - critical: 5-15 units (near/below critical threshold)
+#   - deficit:  0-3 units (essentially out of stock)
+#
+# For key medicines, some shops have excess while others have deficit,
+# creating clear redistribution opportunities.
+
+SHOP_CODES = [s["code"] for s in DEMO_STORES]
+
+# (quantity_range, expiry_pattern) tuples
+QTY_EXCESS   = (300, 600)
+QTY_ADEQUATE = (100, 250)
+QTY_LOW      = (20, 80)
+QTY_CRITICAL = (5, 15)
+QTY_DEFICIT  = (0, 3)
 
 
-def random_expiry_date(rng: random.Random, min_date: date = None, max_date: date = None) -> date:
-    """Generate a random expiry date between min_date and max_date."""
-    if min_date is None:
-        min_date = date(2025, 6, 1)
-    if max_date is None:
-        max_date = date(2027, 12, 31)
+def build_inventory_plan():
+    """
+    Build a structured inventory distribution plan.
+    Returns list of dicts: {brand_name, shop_code, qty_min, qty_max, expiry_bucket, shelf}
+    """
+    plan = []
 
-    days_range = (max_date - min_date).days
-    random_days = rng.randint(0, days_range)
-    return min_date + timedelta(days=random_days)
+    # Define shelf zones per shop
+    shelf_zones = ["Shelf-A1", "Shelf-A2", "Shelf-B1", "Shelf-B2", "Shelf-C1", "Shelf-C2", "Fridge-01", "Fridge-02"]
 
+    def add_entries(brand_name, shop_assignments):
+        """
+        shop_assignments: list of (shop_code, qty_range, expiry_bucket)
+        expiry_bucket: "expired" | "7day" | "30day" | "safe" | "random"
+        """
+        for shop_code, qty_range, expiry_bucket in shop_assignments:
+            shelf = random.choice(shelf_zones)
+            # For cold-sensitive items, prefer fridge shelves
+            med_entry = CATALOG_MAP.get(brand_name, {})
+            if med_entry.get("temp_sensitive"):
+                shelf = random.choice(["Fridge-01", "Fridge-02"])
+            plan.append({
+                "brand_name": brand_name,
+                "shop_code": shop_code,
+                "qty_min": qty_range[0],
+                "qty_max": qty_range[1],
+                "expiry_bucket": expiry_bucket,
+                "shelf": shelf,
+            })
+
+    # ── HIGH-TURNOVER ANALGESICS (6+ shops each for redistribution) ──
+    add_entries("Dolo 650", [
+        ("PH-CEN-001", QTY_EXCESS, "safe"),
+        ("PH-WST-002", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_DEFICIT, "30day"),
+        ("PH-STH-004", QTY_EXCESS, "safe"),
+        ("PH-KOR-005", QTY_LOW, "7day"),
+        ("PH-TNG-007", QTY_CRITICAL, "safe"),
+        ("PH-SLK-008", QTY_ADEQUATE, "expired"),
+    ])
+    add_entries("Crocin Advance", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-WST-002", QTY_EXCESS, "safe"),
+        ("PH-NRT-003", QTY_EXCESS, "safe"),
+        ("PH-STH-004", QTY_LOW, "30day"),
+        ("PH-KOR-005", QTY_DEFICIT, "7day"),
+        ("PH-WHT-006", QTY_ADEQUATE, "safe"),
+        ("PH-TNG-007", QTY_LOW, "expired"),
+    ])
+    add_entries("Combiflam", [
+        ("PH-CEN-001", QTY_EXCESS, "safe"),
+        ("PH-NRT-003", QTY_ADEQUATE, "safe"),
+        ("PH-SLK-008", QTY_DEFICIT, "expired"),
+        ("PH-TNG-007", QTY_LOW, "30day"),
+    ])
+    add_entries("Calpol 500", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-WST-002", QTY_LOW, "7day"),
+        ("PH-KOR-005", QTY_EXCESS, "safe"),
+        ("PH-WHT-006", QTY_CRITICAL, "30day"),
+        ("PH-SLK-008", QTY_DEFICIT, "7day"),
+    ])
+
+    # ── OTHER ANALGESICS ──
+    add_entries("Brufen 400", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-WST-002", QTY_LOW, "expired"),
+        ("PH-NRT-003", QTY_EXCESS, "safe"),
+        ("PH-KOR-005", QTY_DEFICIT, "30day"),
+    ])
+    add_entries("Voveran 50", [
+        ("PH-WST-002", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_LOW, "7day"),
+        ("PH-TNG-007", QTY_EXCESS, "safe"),
+        ("PH-SLK-008", QTY_DEFICIT, "safe"),
+    ])
+    add_entries("Nise 100", [
+        ("PH-CEN-001", QTY_LOW, "safe"),
+        ("PH-STH-004", QTY_EXCESS, "safe"),
+        ("PH-WHT-006", QTY_ADEQUATE, "30day"),
+        ("PH-TNG-007", QTY_DEFICIT, "expired"),
+    ])
+
+    # ── ANTIBIOTICS (controlled, lower quantities) ──
+    add_entries("Augmentin 625", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-WST-002", QTY_LOW, "safe"),
+        ("PH-NRT-003", QTY_DEFICIT, "7day"),
+        ("PH-KOR-005", QTY_EXCESS, "safe"),
+        ("PH-SLK-008", QTY_LOW, "30day"),
+    ])
+    add_entries("Mox 500", [
+        ("PH-CEN-001", QTY_LOW, "safe"),
+        ("PH-WST-002", QTY_EXCESS, "safe"),
+        ("PH-NRT-003", QTY_ADEQUATE, "30day"),
+        ("PH-TNG-007", QTY_DEFICIT, "expired"),
+    ])
+    add_entries("Azithral 500", [
+        ("PH-CEN-001", QTY_EXCESS, "safe"),
+        ("PH-STH-004", QTY_LOW, "7day"),
+        ("PH-KOR-005", QTY_ADEQUATE, "safe"),
+        ("PH-WHT-006", QTY_DEFICIT, "safe"),
+    ])
+    add_entries("Ciplox 500", [
+        ("PH-WST-002", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_EXCESS, "safe"),
+        ("PH-TNG-007", QTY_LOW, "30day"),
+        ("PH-SLK-008", QTY_DEFICIT, "expired"),
+    ])
+    add_entries("Doxy 100", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_LOW, "7day"),
+        ("PH-WHT-006", QTY_EXCESS, "safe"),
+    ])
+
+    # ── ANTI-ALLERGIC ──
+    add_entries("Cetzine", [
+        ("PH-CEN-001", QTY_EXCESS, "safe"),
+        ("PH-WST-002", QTY_ADEQUATE, "safe"),
+        ("PH-KOR-005", QTY_LOW, "30day"),
+        ("PH-TNG-007", QTY_DEFICIT, "safe"),
+    ])
+    add_entries("Allegra 120", [
+        ("PH-NRT-003", QTY_EXCESS, "safe"),
+        ("PH-STH-004", QTY_LOW, "7day"),
+        ("PH-KOR-005", QTY_ADEQUATE, "safe"),
+        ("PH-WHT-006", QTY_DEFICIT, "safe"),
+    ])
+
+    # ── COUGH & COLD ──
+    add_entries("Benadryl", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_EXCESS, "safe"),
+        ("PH-TNG-007", QTY_LOW, "expired"),
+        ("PH-SLK-008", QTY_DEFICIT, "30day"),
+    ])
+    add_entries("Vicks Action 500", [
+        ("PH-WST-002", QTY_EXCESS, "safe"),
+        ("PH-NRT-003", QTY_ADEQUATE, "safe"),
+        ("PH-KOR-005", QTY_LOW, "7day"),
+        ("PH-WHT-006", QTY_DEFICIT, "safe"),
+    ])
+
+    # ── GASTROINTESTINAL + ORS ──
+    add_entries("Pan 40", [
+        ("PH-CEN-001", QTY_EXCESS, "safe"),
+        ("PH-WST-002", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_LOW, "30day"),
+        ("PH-STH-004", QTY_DEFICIT, "7day"),
+        ("PH-KOR-005", QTY_EXCESS, "safe"),
+        ("PH-TNG-007", QTY_CRITICAL, "expired"),
+    ])
+    add_entries("Imodium", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-WST-002", QTY_LOW, "expired"),
+        ("PH-SLK-008", QTY_EXCESS, "safe"),
+        ("PH-TNG-007", QTY_DEFICIT, "30day"),
+    ])
+    add_entries("ORS Electral", [
+        ("PH-CEN-001", QTY_EXCESS, "safe"),
+        ("PH-WST-002", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_EXCESS, "safe"),
+        ("PH-KOR-005", QTY_LOW, "7day"),
+        ("PH-WHT-006", QTY_DEFICIT, "safe"),
+        ("PH-TNG-007", QTY_CRITICAL, "expired"),
+        ("PH-SLK-008", QTY_ADEQUATE, "safe"),
+    ])
+    add_entries("Econorm", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_LOW, "7day"),
+        ("PH-KOR-005", QTY_DEFICIT, "safe"),
+    ])
+
+    # ── VITAMINS & SUPPLEMENTS ──
+    add_entries("Limcee", [
+        ("PH-CEN-001", QTY_EXCESS, "safe"),
+        ("PH-WST-002", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_LOW, "safe"),
+        ("PH-TNG-007", QTY_DEFICIT, "expired"),
+    ])
+    add_entries("Shelcal 500", [
+        ("PH-WST-002", QTY_EXCESS, "safe"),
+        ("PH-NRT-003", QTY_ADEQUATE, "safe"),
+        ("PH-KOR-005", QTY_LOW, "30day"),
+        ("PH-SLK-008", QTY_DEFICIT, "safe"),
+    ])
+    add_entries("Becosules", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-STH-004", QTY_EXCESS, "safe"),
+        ("PH-WHT-006", QTY_LOW, "7day"),
+        ("PH-TNG-007", QTY_DEFICIT, "safe"),
+    ])
+    add_entries("Zincovit", [
+        ("PH-NRT-003", QTY_EXCESS, "safe"),
+        ("PH-KOR-005", QTY_ADEQUATE, "safe"),
+        ("PH-WHT-006", QTY_DEFICIT, "30day"),
+    ])
+
+    # ── ANTIDIABETIC ──
+    add_entries("Glycomet 500", [
+        ("PH-CEN-001", QTY_EXCESS, "safe"),
+        ("PH-NRT-003", QTY_ADEQUATE, "safe"),
+        ("PH-KOR-005", QTY_LOW, "safe"),
+        ("PH-TNG-007", QTY_DEFICIT, "7day"),
+        ("PH-SLK-008", QTY_ADEQUATE, "safe"),
+    ])
+    add_entries("Glimepiride 2", [
+        ("PH-WST-002", QTY_EXCESS, "safe"),
+        ("PH-STH-004", QTY_LOW, "30day"),
+        ("PH-WHT-006", QTY_ADEQUATE, "safe"),
+        ("PH-SLK-008", QTY_DEFICIT, "safe"),
+    ])
+    add_entries("Human Mixtard 30/70", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_CRITICAL, "7day"),
+        ("PH-KOR-005", QTY_LOW, "safe"),
+        ("PH-TNG-007", QTY_DEFICIT, "safe"),
+    ])
+
+    # ── ANTIHYPERTENSIVE ──
+    add_entries("Telma 40", [
+        ("PH-CEN-001", QTY_EXCESS, "safe"),
+        ("PH-WST-002", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_LOW, "30day"),
+        ("PH-KOR-005", QTY_EXCESS, "safe"),
+        ("PH-SLK-008", QTY_DEFICIT, "expired"),
+    ])
+    add_entries("Amlong 5", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-STH-004", QTY_EXCESS, "safe"),
+        ("PH-TNG-007", QTY_LOW, "7day"),
+        ("PH-WHT-006", QTY_DEFICIT, "safe"),
+    ])
+    add_entries("Atorva 10", [
+        ("PH-WST-002", QTY_EXCESS, "safe"),
+        ("PH-NRT-003", QTY_ADEQUATE, "safe"),
+        ("PH-WHT-006", QTY_LOW, "30day"),
+        ("PH-SLK-008", QTY_DEFICIT, "safe"),
+    ])
+
+    # ── DERMATOLOGY ──
+    add_entries("Betadine", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-WST-002", QTY_LOW, "expired"),
+        ("PH-KOR-005", QTY_EXCESS, "safe"),
+        ("PH-TNG-007", QTY_DEFICIT, "safe"),
+    ])
+    add_entries("Candid-B", [
+        ("PH-NRT-003", QTY_EXCESS, "safe"),
+        ("PH-STH-004", QTY_ADEQUATE, "safe"),
+        ("PH-WHT-006", QTY_LOW, "30day"),
+        ("PH-SLK-008", QTY_DEFICIT, "safe"),
+    ])
+    add_entries("Soframycin", [
+        ("PH-CEN-001", QTY_LOW, "7day"),
+        ("PH-WST-002", QTY_EXCESS, "safe"),
+        ("PH-TNG-007", QTY_ADEQUATE, "safe"),
+    ])
+
+    # ── OPHTHALMOLOGY ──
+    add_entries("Refresh Tears", [
+        ("PH-CEN-001", QTY_EXCESS, "safe"),
+        ("PH-NRT-003", QTY_ADEQUATE, "safe"),
+        ("PH-KOR-005", QTY_LOW, "30day"),
+        ("PH-TNG-007", QTY_DEFICIT, "safe"),
+    ])
+
+    # ── ANTI-INFLAMMATORY ──
+    add_entries("Etorica 90", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-WST-002", QTY_EXCESS, "safe"),
+        ("PH-NRT-003", QTY_DEFICIT, "7day"),
+        ("PH-SLK-008", QTY_LOW, "safe"),
+    ])
+
+    # ── ANTISPASMODIC ──
+    add_entries("Cyclopam", [
+        ("PH-CEN-001", QTY_ADEQUATE, "safe"),
+        ("PH-NRT-003", QTY_LOW, "30day"),
+        ("PH-KOR-005", QTY_EXCESS, "safe"),
+        ("PH-WHT-006", QTY_DEFICIT, "safe"),
+    ])
+
+    # ── ANTIEMETIC ──
+    add_entries("Emset 4", [
+        ("PH-WST-002", QTY_EXCESS, "safe"),
+        ("PH-NRT-003", QTY_ADEQUATE, "safe"),
+        ("PH-TNG-007", QTY_LOW, "expired"),
+        ("PH-SLK-008", QTY_DEFICIT, "7day"),
+    ])
+
+    return plan
+
+
+# ──────────────────────────────────────────────────────────────────
+# MAIN SEED FUNCTION
+# ──────────────────────────────────────────────────────────────────
 
 def seed_database() -> None:
-    """Seed the database with enhanced sample data."""
-    # ── Create all tables if they don't exist ──────────────────
+    """Seed the database with comprehensive sample data."""
+
+    # ── Step 0: Drop all existing tables and recreate ──────────
+    print("=" * 65)
+    print("  MediSebi Enhanced Seed — Dropping & Recreating All Tables")
+    print("=" * 65)
+    Base.metadata.drop_all(bind=engine)
+    print("  [DROP]  All existing tables dropped")
     Base.metadata.create_all(bind=engine)
-    print("✓ Tables ensured via Base.metadata.create_all()")
+    print("  [CREATE] All tables recreated from models\n")
 
     db = SessionLocal()
 
     try:
-        counters = {
-            "users_created": 0,
-            "users_existing": 0,
-            "salts_created": 0,
-            "salts_existing": 0,
-            "medicines_created": 0,
-            "medicines_existing": 0,
-            "shops_created": 0,
-            "shops_existing": 0,
-            "inventory_created": 0,
-            "assignments_created": 0,
-        }
+        # ────────────────────────────────────────────────────────
+        # 1. USERS (2)
+        # ────────────────────────────────────────────────────────
+        print("─── 1. USERS ────────────────────────────────────")
+
+        admin_password = hash_password("Admin@12345!")
+        pharmacist_password = hash_password("Pharm@12345!")
+
+        admin_user = User(
+            username="admin",
+            email="admin@medisebi.com",
+            password_hash=admin_password,
+            full_name="System Administrator",
+            role=UserRole.ADMIN,
+            is_locked=False,
+            failed_login_attempts=0,
+            password_changed_at=datetime.now(timezone.utc),
+            password_changed_by="self",
+            must_change_password=False,
+            mfa_enabled=False,
+        )
+        pharmacist_user = User(
+            username="pharmacist",
+            email="pharmacist@medisebi.com",
+            password_hash=pharmacist_password,
+            full_name="Dr. Priya Sharma",
+            role=UserRole.PHARMACIST,
+            is_locked=False,
+            failed_login_attempts=0,
+            password_changed_at=datetime.now(timezone.utc),
+            password_changed_by="self",
+            must_change_password=False,
+            mfa_enabled=False,
+        )
+        db.add(admin_user)
+        db.add(pharmacist_user)
+        db.flush()
+        print(f"  + admin       (id={admin_user.id}, role=ADMIN)")
+        print(f"  + pharmacist  (id={pharmacist_user.id}, role=PHARMACIST)")
 
         # ────────────────────────────────────────────────────────
-        # 1. USERS
+        # 2. SHOPS (8 from DEMO_STORES)
         # ────────────────────────────────────────────────────────
-        user_objects = {}
-        for ud in USERS_DATA:
-            existing = db.execute(
-                select(User).where(User.email == ud["email"])
-            ).scalar_one_or_none()
+        print("\n─── 2. SHOPS ───────────────────────────────────")
 
-            if existing:
-                user_objects[ud["username"]] = existing
-                counters["users_existing"] += 1
-                print(f"  · User already exists: {ud['email']}")
-            else:
-                hashed_pw = hash_password(ud["password"])
-                user = User(
-                    username=ud["username"],
-                    email=ud["email"],
-                    password_hash=hashed_pw,
-                    full_name=ud["full_name"],
-                    role=ud["role"],
-                    is_locked=False,
-                    failed_login_attempts=0,
-                    password_changed_at=datetime.now(timezone.utc),
-                    password_changed_by="self",
-                    must_change_password=False,
-                    mfa_enabled=False,
-                )
-                db.add(user)
-                db.flush()
-                user_objects[ud["username"]] = user
-                counters["users_created"] += 1
-                print(f"  ✓ User created: {ud['email']} (role={ud['role'].value})")
-
-        print(f"✓ Users: {counters['users_created']} created, {counters['users_existing']} existing")
-
-        # ────────────────────────────────────────────────────────
-        # 2. SALTS & MEDICINES (from MEDICINE_CATALOG)
-        # ────────────────────────────────────────────────────────
-        salt_objects = {}   # formula_name -> Salt
-        medicine_objects = []  # list of (Medicine, catalog_item)
-
-        for item in MEDICINE_CATALOG:
-            salt_name = item["salt_name"]
-
-            # Check or create Salt
-            existing_salt = db.execute(
-                select(Salt).where(Salt.formula_name == salt_name)
-            ).scalar_one_or_none()
-
-            if existing_salt:
-                salt = existing_salt
-                counters["salts_existing"] += 1
-            else:
-                abc_class = ABC_CLASS_MAP.get(item["abc_class"], ABCClass.C)
-                warning_threshold = int(item["reorder"] * 0.5) if item.get("reorder") else None
-
-                salt = Salt(
-                    formula_name=salt_name,
-                    category=item["category"],
-                    abc_class=abc_class,
-                    reorder_level=item["reorder"],
-                    safety_stock=item["safety_stock"],
-                    critical_threshold=item["critical"],
-                    warning_threshold=warning_threshold,
-                    description=f"{salt_name} — {item['category']}",
-                    dosage_form=item.get("form"),
-                    standard_strength=item.get("strength"),
-                    unit_of_measure="units",
-                )
-                db.add(salt)
-                db.flush()
-                counters["salts_created"] += 1
-
-            salt_objects[salt_name] = salt
-
-            # Check or create Medicine
-            existing_med = db.execute(
-                select(Medicine).where(
-                    Medicine.brand_name == item["brand_name"],
-                    Medicine.manufacturer == item["manufacturer"],
-                )
-            ).scalar_one_or_none()
-
-            if existing_med:
-                counters["medicines_existing"] += 1
-                medicine_objects.append((existing_med, item))
-            else:
-                batch_prefix = derive_batch_prefix(item["brand_name"], item["manufacturer"])
-                med = Medicine(
-                    brand_name=item["brand_name"],
-                    salt_id=salt.id,
-                    manufacturer=item["manufacturer"],
-                    strength=item["strength"],
-                    dosage_form=item["form"],
-                    unit_price=item["price"],
-                    batch_prefix=batch_prefix,
-                    temperature_sensitive=item.get("temp_sensitive", False),
-                )
-                db.add(med)
-                db.flush()
-                counters["medicines_created"] += 1
-                medicine_objects.append((med, item))
-
-        total_salts = counters["salts_created"] + counters["salts_existing"]
-        total_meds = counters["medicines_created"] + counters["medicines_existing"]
-        print(f"✓ Salts: {counters['salts_created']} created, {counters['salts_existing']} existing (total: {total_salts})")
-        print(f"✓ Medicines: {counters['medicines_created']} created, {counters['medicines_existing']} existing (total: {total_meds})")
-
-        # ────────────────────────────────────────────────────────
-        # 3. SHOPS (from DEMO_STORES)
-        # ────────────────────────────────────────────────────────
-        shop_objects = {}  # code -> Shop
-
+        shop_objects = {}
         for sd in DEMO_STORES:
-            existing_shop = db.execute(
-                select(Shop).where(Shop.code == sd["code"])
-            ).scalar_one_or_none()
-
-            if existing_shop:
-                shop_objects[sd["code"]] = existing_shop
-                counters["shops_existing"] += 1
-                print(f"  · Shop already exists: {sd['code']} — {sd['name']}")
-            else:
-                shop = Shop(
-                    name=sd["name"],
-                    code=sd["code"],
-                    city=sd["city"],
-                    state=sd["state"],
-                    address=sd["address"],
-                    pincode=sd["pincode"],
-                    latitude=sd["lat"],
-                    longitude=sd["lon"],
-                    contact_phone=sd["phone"],
-                    contact_email=sd["email"],
-                    storage_capacity=sd["capacity"],
-                )
-                db.add(shop)
-                db.flush()
-                shop_objects[sd["code"]] = shop
-                counters["shops_created"] += 1
-                print(f"  ✓ Shop created: {sd['code']} — {sd['name']} ({sd['city']})")
-
-        total_shops = counters["shops_created"] + counters["shops_existing"]
-        print(f"✓ Shops: {counters['shops_created']} created, {counters['shops_existing']} existing (total: {total_shops})")
+            shop = Shop(
+                name=sd["name"],
+                code=sd["code"],
+                city=sd["city"],
+                state=sd["state"],
+                address=sd["address"],
+                pincode=sd["pincode"],
+                latitude=sd["lat"],
+                longitude=sd["lon"],
+                contact_phone=sd["phone"],
+                contact_email=sd["email"],
+                storage_capacity=sd["capacity"],
+            )
+            db.add(shop)
+            db.flush()
+            shop_objects[sd["code"]] = shop
+            print(f"  + {shop.name:30s} ({shop.code}) — {shop.city}, {shop.state}")
 
         # ────────────────────────────────────────────────────────
-        # 4. INVENTORY (realistic stock levels per shop)
+        # 3. SALTS (20+ unique from catalog)
         # ────────────────────────────────────────────────────────
-        # Use a global RNG for deterministic results
-        master_rng = random.Random(42)
+        print("\n─── 3. SALTS ───────────────────────────────────")
 
-        # Group shops by city for per-city seeding
-        shops_by_city = {}
-        for code, shop in shop_objects.items():
-            city = shop.city
-            if city not in shops_by_city:
-                shops_by_city[city] = []
-            shops_by_city[city].append((code, shop))
+        abc_map = {"A": ABCClass.A, "B": ABCClass.B, "C": ABCClass.C}
+        salt_objects = {}
+        for sn, sd in UNIQUE_SALTS.items():
+            salt = Salt(
+                formula_name=sd["formula_name"],
+                category=sd["category"],
+                abc_class=abc_map[sd["abc_class"]],
+                reorder_level=sd["reorder_level"],
+                safety_stock=sd["safety_stock"],
+                critical_threshold=sd["critical_threshold"],
+                warning_threshold=sd["warning_threshold"],
+                dosage_form=sd["dosage_form"],
+                standard_strength=sd["standard_strength"],
+                unit_of_measure=sd["unit_of_measure"],
+                description=f"{sd['formula_name']} — therapeutic category: {sd['category']}",
+            )
+            db.add(salt)
+            db.flush()
+            salt_objects[sd["formula_name"]] = salt
 
-        # Track how many inventory items we create
-        low_stock_count = 0
+        salt_names = sorted(salt_objects.keys())
+        print(f"  + {len(salt_objects)} salts created:")
+        for sn in salt_names:
+            s = salt_objects[sn]
+            print(f"    - {sn:50s} [{s.abc_class.value}] reorder={s.reorder_level} critical={s.critical_threshold}")
+
+        # ────────────────────────────────────────────────────────
+        # 4. MEDICINES (35 from catalog)
+        # ────────────────────────────────────────────────────────
+        print("\n─── 4. MEDICINES ───────────────────────────────")
+
+        medicine_objects = {}
+        for med_cat in SELECTED_CATALOG:
+            salt_key = med_cat["salt_name"]
+            # Generate a batch prefix from brand initials
+            brand_initials = "".join(w[0] for w in med_cat["brand_name"].split()[:2]).upper()[:5]
+            medicine = Medicine(
+                brand_name=med_cat["brand_name"],
+                salt_id=salt_objects[salt_key].id,
+                manufacturer=med_cat["manufacturer"],
+                strength=med_cat["strength"],
+                dosage_form=med_cat["form"],
+                unit_price=med_cat["price"],
+                temperature_sensitive=med_cat["temp_sensitive"],
+                batch_prefix=brand_initials,
+            )
+            db.add(medicine)
+            db.flush()
+            medicine_objects[med_cat["brand_name"]] = medicine
+
+        print(f"  + {len(medicine_objects)} medicines created:")
+        for name, med in medicine_objects.items():
+            salt_name = med.salt.formula_name if med.salt else "?"
+            print(f"    - {name:30s} → {salt_name}")
+
+        # ────────────────────────────────────────────────────────
+        # 5. INVENTORY (120+ entries with strategic distribution)
+        # ────────────────────────────────────────────────────────
+        print("\n─── 5. INVENTORY ───────────────────────────────")
+
+        inventory_plan = build_inventory_plan()
+        inv_count = 0
         expired_count = 0
-        near_expiry_count = 0
-        normal_count = 0
+        near_expiry_count = 0  # within 30 days
+        safe_count = 0
 
-        today = date.today()
+        for entry in inventory_plan:
+            med = medicine_objects[entry["brand_name"]]
+            shop = shop_objects[entry["shop_code"]]
 
-        for city, city_shops in shops_by_city.items():
-            # Deterministic seed per city
-            city_seed = int(hashlib.md5(city.encode()).hexdigest()[:8], 16)
-            city_rng = random.Random(city_seed)
+            # Determine expiry date based on bucket
+            bucket = entry["expiry_bucket"]
+            if bucket == "expired":
+                exp = expiry_offset(-random.randint(10, 200))
+            elif bucket == "7day":
+                exp = expiry_offset(random.randint(1, 7))
+            elif bucket == "30day":
+                exp = expiry_offset(random.randint(8, 30))
+            elif bucket == "safe":
+                exp = expiry_offset(random.randint(180, 730))
+            else:  # "random"
+                exp = random_expiry_bucket()
 
-            for shop_code, shop in city_shops:
-                is_central = shop_code in CENTRAL_CODES
-                is_peripheral = shop_code in PERIPHERAL_CODES
+            # Classify expiry status
+            days_to_exp = (exp - TODAY).days
+            if days_to_exp < 0:
+                expired_count += 1
+            elif days_to_exp <= 30:
+                near_expiry_count += 1
+            else:
+                safe_count += 1
 
-                # Central shops carry 38-50 medicines; peripheral carry 30-40
-                if is_central:
-                    num_medicines = city_rng.randint(38, 50)
-                else:
-                    num_medicines = city_rng.randint(30, 40)
+            # Generate batch number
+            bp = med.batch_prefix or "GEN"
+            batch_num = f"{bp}-{TODAY.year}-{random.randint(100,999)}"
 
-                # Select medicines for this shop (shuffle and take first N)
-                shuffled_meds = list(medicine_objects)
-                city_rng.shuffle(shuffled_meds)
-                selected_meds = shuffled_meds[:num_medicines]
+            # Determine prices (cost ~70-80% of sell)
+            unit_sell = med.unit_price or 10.0
+            unit_cost = round(unit_sell * random.uniform(0.65, 0.80), 2)
 
-                for idx, (med, cat_item) in enumerate(selected_meds):
-                    # Determine stock level category
-                    roll = city_rng.random()
+            qty = random.randint(entry["qty_min"], entry["qty_max"])
 
-                    if roll < 0.08:
-                        # ~8% EXPIRED items — expired before today
-                        stock_multiplier = city_rng.uniform(0.2, 0.8)
-                        # Expiry date in the past (3-12 months ago)
-                        expired_days_ago = city_rng.randint(90, 365)
-                        expiry = today - timedelta(days=expired_days_ago)
-                        expired_count += 1
-                    elif roll < 0.15:
-                        # ~7% NEAR-EXPIRY — expiring within 90 days
-                        stock_multiplier = city_rng.uniform(0.5, 1.0)
-                        days_until_expiry = city_rng.randint(1, 90)
-                        expiry = today + timedelta(days=days_until_expiry)
-                        near_expiry_count += 1
-                    elif roll < 0.30:
-                        # ~15% LOW STOCK — 10-30% of reorder level
-                        stock_multiplier = city_rng.uniform(0.10, 0.30)
-                        expiry = random_expiry_date(
-                            city_rng,
-                            min_date=today + timedelta(days=60),
-                            max_date=date(2027, 6, 30),
-                        )
-                        low_stock_count += 1
-                    elif is_central:
-                        # Central shops: 60-120% of reorder level
-                        stock_multiplier = city_rng.uniform(0.60, 1.20)
-                        expiry = random_expiry_date(
-                            city_rng,
-                            min_date=today + timedelta(days=90),
-                            max_date=date(2027, 12, 31),
-                        )
-                        normal_count += 1
-                    else:
-                        # Peripheral shops: 20-60% of reorder level
-                        stock_multiplier = city_rng.uniform(0.20, 0.60)
-                        expiry = random_expiry_date(
-                            city_rng,
-                            min_date=today + timedelta(days=90),
-                            max_date=date(2027, 12, 31),
-                        )
-                        normal_count += 1
+            item = Inventory(
+                med_id=med.id,
+                shop_id=shop.id,
+                quantity=qty,
+                batch_number=batch_num,
+                expiry_date=exp,
+                cost_price=unit_cost,
+                selling_price=unit_sell,
+                storage_location=entry["shelf"],
+            )
+            db.add(item)
+            inv_count += 1
 
-                    # Calculate actual quantity
-                    reorder_level = cat_item.get("reorder", 100)
-                    quantity = max(1, int(reorder_level * stock_multiplier))
+        db.flush()
 
-                    # Determine pricing
-                    base_price = cat_item.get("price", 25.0)
-                    cost_price = round(base_price * city_rng.uniform(0.65, 0.80), 2)
-                    selling_price = round(base_price * city_rng.uniform(0.95, 1.10), 2)
+        # Compute some redistribution stats
+        deficit_items = sum(1 for e in inventory_plan if e["qty_max"] <= 3)
+        excess_items = sum(1 for e in inventory_plan if e["qty_min"] >= 300)
 
-                    # Generate batch number
-                    batch_prefix = med.batch_prefix or "XXX"
-                    batch_seed = city_seed + med.id + idx
-                    batch_number = generate_batch_number(batch_prefix, batch_seed)
-
-                    # Storage location
-                    shelf_letter = chr(ord('A') + (idx % 6))
-                    shelf_number = (idx // 6) + 1
-                    storage_location = f"Shelf-{shelf_letter}{shelf_number}"
-
-                    # Check for existing inventory entry (idempotency)
-                    existing_inv = db.execute(
-                        select(Inventory).where(
-                            Inventory.med_id == med.id,
-                            Inventory.shop_id == shop.id,
-                            Inventory.batch_number == batch_number,
-                        )
-                    ).scalar_one_or_none()
-
-                    if existing_inv:
-                        continue
-
-                    # Create inventory entry
-                    inv = Inventory(
-                        med_id=med.id,
-                        shop_id=shop.id,
-                        quantity=quantity,
-                        batch_number=batch_number,
-                        expiry_date=expiry,
-                        cost_price=cost_price,
-                        selling_price=selling_price,
-                        storage_location=storage_location,
-                    )
-                    db.add(inv)
-                    counters["inventory_created"] += 1
-
-                # Flush per shop to avoid memory buildup
-                db.flush()
-
-        print(f"✓ Inventory entries created: {counters['inventory_created']}")
-        print(f"    ├─ Normal stock:    {normal_count}")
-        print(f"    ├─ Low stock:       {low_stock_count}")
-        print(f"    ├─ Near-expiry:     {near_expiry_count}")
-        print(f"    └─ Expired:         {expired_count}")
+        print(f"  + {inv_count} inventory entries created")
+        print(f"    - Expired:        {expired_count:>4d} (past due)")
+        print(f"    - Near expiry:    {near_expiry_count:>4d} (within 30 days)")
+        print(f"    - Safe stock:     {safe_count:>4d} (6+ months)")
+        print(f"    - Deficit stock:  {deficit_items:>4d} entries (0-3 units, redistribution targets)")
+        print(f"    - Excess stock:   {excess_items:>4d} entries (300+, redistribution sources)")
 
         # ────────────────────────────────────────────────────────
-        # 5. SHOP-STAFF ASSIGNMENTS
+        # 6. SHOP-STAFF ASSIGNMENTS
         # ────────────────────────────────────────────────────────
-        for city, city_shops in shops_by_city.items():
-            # Determine which pharmacist manages this city
-            pharmacist_key = CITY_PHARMACIST_MAP.get(city) or EXTRA_CITY_PHARMACIST_MAP.get(city)
-            if not pharmacist_key or pharmacist_key not in user_objects:
-                continue
+        print("\n─── 6. SHOP-STAFF ASSIGNMENTS ──────────────────")
 
-            pharmacist = user_objects[pharmacist_key]
+        assignments = []
 
-            for shop_idx, (shop_code, shop) in enumerate(city_shops):
-                # Check if assignment already exists
-                existing_assignment = db.execute(
-                    select(ShopStaff).where(
-                        ShopStaff.user_id == pharmacist.id,
-                        ShopStaff.shop_id == shop.id,
-                    )
-                ).scalar_one_or_none()
+        # Admin assigned to all 8 shops
+        for i, sd in enumerate(DEMO_STORES):
+            assignments.append({
+                "user_id": admin_user.id,
+                "shop_code": sd["code"],
+                "is_primary": (i == 0),  # Primary at Central
+            })
 
-                if existing_assignment:
-                    print(f"  · Assignment exists: {pharmacist_key} → {shop_code}")
-                    continue
+        # Pharmacist assigned to all 8 shops (primary at Koramangala)
+        for i, sd in enumerate(DEMO_STORES):
+            is_primary = (sd["code"] == "PH-KOR-005")
+            assignments.append({
+                "user_id": pharmacist_user.id,
+                "shop_code": sd["code"],
+                "is_primary": is_primary,
+            })
 
-                is_primary = (shop_idx == 0)
-                assignment = ShopStaff(
-                    user_id=pharmacist.id,
-                    shop_id=shop.id,
-                    assigned_date=today,
-                    is_primary=is_primary,
-                )
-                db.add(assignment)
-                counters["assignments_created"] += 1
-                primary_marker = " (primary)" if is_primary else ""
-                print(f"  ✓ Assignment created: {pharmacist_key} → {shop_code}{primary_marker}")
+        for asgn in assignments:
+            shop_staff = ShopStaff(
+                user_id=asgn["user_id"],
+                shop_id=shop_objects[asgn["shop_code"]].id,
+                assigned_date=date.today(),
+                is_primary=asgn["is_primary"],
+            )
+            db.add(shop_staff)
 
-        print(f"✓ Shop-Staff assignments: {counters['assignments_created']} created")
+        db.flush()
+        admin_assignments = sum(1 for a in assignments if a["user_id"] == admin_user.id)
+        pharm_assignments = sum(1 for a in assignments if a["user_id"] == pharmacist_user.id)
+        print(f"  + {len(assignments)} assignments created:")
+        print(f"    - admin       → {admin_assignments} shops (primary: Central)")
+        print(f"    - pharmacist  → {pharm_assignments} shops (primary: Koramangala)")
 
         # ────────────────────────────────────────────────────────
         # COMMIT
@@ -495,59 +749,43 @@ def seed_database() -> None:
         db.commit()
 
         # ────────────────────────────────────────────────────────
-        # SUMMARY
+        # FINAL SUMMARY
         # ────────────────────────────────────────────────────────
-        city_summary = {}
-        for code, shop in shop_objects.items():
-            city = shop.city
-            if city not in city_summary:
-                city_summary[city] = []
-            city_summary[city].append(f"{shop.name} ({code})")
-
-        print("\n" + "=" * 64)
-        print("  MediSebi Enhanced Database — Seeded Successfully!")
-        print("=" * 64)
+        print("\n" + "=" * 65)
+        print("  MediSebi Enhanced Database Seeded Successfully!")
+        print("=" * 65)
         print(f"""
-  📊 SEED SUMMARY
-  ─────────────────────────────────────────────────────
-  Users:              {counters['users_created']} created, {counters['users_existing']} existing
-  Salts (APIs):       {counters['salts_created']} created, {counters['salts_existing']} existing
-  Medicines:          {counters['medicines_created']} created, {counters['medicines_existing']} existing
-  Shops:              {counters['shops_created']} created, {counters['shops_existing']} existing
-  Inventory Entries:  {counters['inventory_created']}
-  Shop-Staff Links:   {counters['assignments_created']}
+  SEED SUMMARY
+  ──────────────────────────────────────────────────────────
+  Users:           2   (admin, pharmacist)
+  Salts:           {len(salt_objects):>3d} ({len(salt_names)} unique APIs from catalog)
+  Medicines:       {len(medicine_objects):>3d} (diverse brands across {len(set(c['category'] for c in SELECTED_CATALOG))} categories)
+  Shops:           8   (Mumbai, Delhi, Bangalore, Chennai, Kolkata)
+  Inventory:       {inv_count:>3d} entries across 8 shops
+    Expired:       {expired_count:>3d} items (for expiry watchdog testing)
+    Near-expiry:   {near_expiry_count:>3d} items (7-30 days, alert testing)
+    Safe:          {safe_count:>3d} items (6+ months, normal operations)
+    Deficit:       {deficit_items:>3d} items (redistribution demand targets)
+    Excess:        {excess_items:>3d} items (redistribution supply sources)
+  Shop-Staff:      {len(assignments):>3d} assignments (both users → all shops)
 
-  📦 INVENTORY BREAKDOWN
-  ─────────────────────────────────────────────────────
-  Normal Stock:       {normal_count}
-  Low Stock:          {low_stock_count}  (for marketplace demo)
-  Near-Expiry:        {near_expiry_count}  (within 90 days)
-  Expired:            {expired_count}  (for expiry watchdog demo)
+  TEST CREDENTIALS
+  ──────────────────────────────────────────────────────────
+  Admin:       admin@medisebi.com       /  Admin@12345!
+  Pharmacist:  pharmacist@medisebi.com  /  Pharm@12345!
 
-  🏪 SHOPS BY CITY
-  ─────────────────────────────────────────────────────""")
-
-        for city, shops in sorted(city_summary.items()):
-            pharm_key = CITY_PHARMACIST_MAP.get(city) or EXTRA_CITY_PHARMACIST_MAP.get(city, "?")
-            print(f"\n  {city} (pharmacist: {pharm_key})")
-            for s in shops:
-                print(f"    • {s}")
-
-        print(f"""
-  🔑 TEST CREDENTIALS
-  ─────────────────────────────────────────────────────
-  Admin:        admin@medisebi.com         / Admin@12345!
-  Pharmacist 1: pharmacist1@medisebi.com   / Pharm@12345!   (Mumbai)
-  Pharmacist 2: pharmacist2@medisebi.com   / Pharm2@12345!  (Delhi)
-  Pharmacist 3: pharmacist3@medisebi.com   / Pharm3@12345!  (Bangalore)
-  Pharmacist 4: pharmacist4@medisebi.com   / Pharm4@12345!  (Chennai + Kolkata)
-
-  📁 Database: medisebi_dev.db (local SQLite)
+  SHOP NETWORK
+  ──────────────────────────────────────────────────────────
+  Mumbai:      PH-CEN-001 (Central), PH-WST-002 (West)
+  Delhi:       PH-NRT-003 (North), PH-STH-004 (South)
+  Bangalore:   PH-KOR-005 (Koramangala), PH-WHT-006 (Whitefield)
+  Chennai:     PH-TNG-007 (T. Nagar)
+  Kolkata:     PH-SLK-008 (Salt Lake)
 """)
 
     except Exception as e:
         db.rollback()
-        print(f"\n✗ Seed failed: {e}")
+        print(f"\n  [ERROR] Seed failed: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

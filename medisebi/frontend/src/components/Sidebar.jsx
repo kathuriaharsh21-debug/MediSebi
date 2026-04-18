@@ -7,16 +7,67 @@ import {
   Store,
   LogOut,
   Activity,
+  Clock,
+  CloudSun,
+  TrendingUp,
+  ShoppingBag,
+  BookOpen,
+  Bell,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
-const navItems = [
+const coreItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/inventory', label: 'Inventory', icon: Package },
   { path: '/medicines', label: 'Medicines', icon: Pill },
   { path: '/substitution', label: 'Substitution', icon: ArrowLeftRight },
   { path: '/shops', label: 'Shops', icon: Store },
 ];
+
+const intelligenceItems = [
+  { path: '/expiry', label: 'Expiry Watchdog', icon: Clock },
+  { path: '/climate', label: 'Climate Intel', icon: CloudSun },
+  { path: '/forecast', label: 'Demand Forecast', icon: TrendingUp },
+  { path: '/transfers', label: 'Redistribution', icon: ArrowLeftRight },
+  { path: '/marketplace', label: 'Marketplace', icon: ShoppingBag },
+];
+
+const toolItems = [
+  { path: '/catalog', label: 'Medicine Catalog', icon: BookOpen },
+];
+
+function NavGroup({ items, location }) {
+  return items.map(({ path, label, icon: Icon }) => {
+    const isActive =
+      path === '/'
+        ? location.pathname === '/'
+        : location.pathname.startsWith(path);
+    return (
+      <Link
+        key={path}
+        to={path}
+        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+          isActive
+            ? 'bg-indigo-600/15 text-indigo-400'
+            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/70'
+        }`}
+      >
+        <Icon className="w-[18px] h-[18px]" />
+        {label}
+      </Link>
+    );
+  });
+}
+
+function SectionDivider({ label }) {
+  return (
+    <div className="pt-4 pb-1 px-3">
+      <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">
+        {label}
+      </span>
+    </div>
+  );
+}
 
 export default function Sidebar() {
   const location = useLocation();
@@ -37,26 +88,16 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {navItems.map(({ path, label, icon: Icon }) => {
-          const isActive =
-            path === '/'
-              ? location.pathname === '/'
-              : location.pathname.startsWith(path);
-          return (
-            <Link
-              key={path}
-              to={path}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
-                isActive
-                  ? 'bg-indigo-600/15 text-indigo-400'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/70'
-              }`}
-            >
-              <Icon className="w-[18px] h-[18px]" />
-              {label}
-            </Link>
-          );
-        })}
+        {/* Core Section */}
+        <NavGroup items={coreItems} location={location} />
+
+        {/* Intelligence Section */}
+        <SectionDivider label="Intelligence" />
+        <NavGroup items={intelligenceItems} location={location} />
+
+        {/* Tools Section */}
+        <SectionDivider label="Tools" />
+        <NavGroup items={toolItems} location={location} />
       </nav>
 
       {/* User info + logout */}

@@ -883,27 +883,6 @@ def get_transfer_analytics(db: Session) -> dict:
     ]
 
     # ── Shop-to-shop transfer frequency matrix ────────────────
-    transfer_pairs = db.execute(
-        select(
-            StockTransferRequest.from_shop_id,
-            Shop.name.label("from_shop_name"),
-            StockTransferRequest.to_shop_id,
-            Shop.name.label("to_shop_name"),
-            func.count(StockTransferRequest.id).label("transfer_count"),
-            func.coalesce(func.sum(StockTransferRequest.quantity_transferred), 0).label("total_units"),
-        )
-        .join(Shop, StockTransferRequest.from_shop_id == Shop.id)
-        .where(StockTransferRequest.status == TransferStatus.COMPLETED)
-        .group_by(
-            StockTransferRequest.from_shop_id,
-            StockTransferRequest.to_shop_id,
-        )
-        .order_by(func.count(StockTransferRequest.id).desc())
-        .limit(20)
-    ).all()
-
-    # We need to fix the join — let's do it properly with aliases
-    from sqlalchemy import and_
     from sqlalchemy.orm import aliased
 
     SourceShop = aliased(Shop)
