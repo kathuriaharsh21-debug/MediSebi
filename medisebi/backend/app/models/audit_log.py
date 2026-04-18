@@ -48,11 +48,18 @@ class ActionType(str, enum.Enum):
     # ── Shop Operations ─────────────────────────────────────
     SHOP_CREATED = "shop_created"
     SHOP_UPDATED = "shop_updated"
+    SHOP_DELETED = "shop_deleted"               # Soft delete
+
+    # ── Salt Operations ─────────────────────────────────────
+    SALT_CREATED = "salt_created"
+    SALT_UPDATED = "salt_updated"
+    SALT_DELETED = "salt_deleted"               # Soft delete
 
     # ── System Operations ───────────────────────────────────
     SYSTEM_ALERT = "system_alert"
     REDISTRIBUTION_TRIGGERED = "redistribution_triggered"
     FORECAST_GENERATED = "forecast_generated"
+    NOTIFICATION_SENT = "notification_sent"
 
 
 class AuditLog(Base, TimestampMixin):

@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import {
   ArrowLeftRight, RefreshCw, Filter, CheckCircle, XCircle, AlertTriangle,
-  Package, TrendingUp, Loader2, ChevronLeft, ChevronRight, Search, Zap,
+  Package, TrendingUp, Loader2, ChevronLeft, ChevronRight, Zap,
   BarChart3, Clock, History, Send, Ban, Play,
 } from 'lucide-react';
 import { transfersAPI, shopsAPI } from '../services/api';

@@ -4,12 +4,22 @@ MediSebi — Main FastAPI Application
 AI-Driven Healthcare Supply Intelligence & Redistribution Platform.
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.api.v1 import api_router
+from app.core.database import Base, get_engine
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Create database tables on startup."""
+    Base.metadata.create_all(bind=get_engine())
+    yield
 
 
 def create_application() -> FastAPI:
@@ -22,6 +32,7 @@ def create_application() -> FastAPI:
         description=settings.APP_DESCRIPTION,
         docs_url="/docs" if settings.DEBUG else None,
         redoc_url="/redoc" if settings.DEBUG else None,
+        lifespan=lifespan,
     )
 
     # ── CORS Middleware ──────────────────────────────────────

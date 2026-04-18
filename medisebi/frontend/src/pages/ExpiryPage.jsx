@@ -94,7 +94,7 @@ export default function ExpiryPage() {
       const params = { page, size: pageSize };
       if (shopFilter) params.shop_id = shopFilter;
       if (severityFilter) params.severity = severityFilter;
-      if (categoryFilter) params.category = categoryFilter;
+      if (categoryFilter) params.salt_category = categoryFilter;
       const { data } = await expiryAPI.items(params);
       setItems(data?.items || data || []);
       setTotal(data?.total || (Array.isArray(data) ? data.length : 0));
@@ -407,8 +407,8 @@ export default function ExpiryPage() {
                         {formatDate(item.expiry_date)}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${style}`}>
-                          {severity}
+                        <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-700/50 text-slate-300 border border-slate-600/30">
+                          {item.salt_category || 'General'}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">

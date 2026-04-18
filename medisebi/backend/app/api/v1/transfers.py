@@ -18,7 +18,7 @@ Endpoints:
     GET  /transfers/shop/{id}/history    — Shop transfer history
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -150,7 +150,7 @@ def analyze_all(
     """
     opportunities = analyze_redistribution_opportunities(db)
     return {
-        "analysis_timestamp": datetime.utcnow().isoformat(),
+        "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
         "total_opportunities": len(opportunities),
         "opportunities": opportunities,
     }

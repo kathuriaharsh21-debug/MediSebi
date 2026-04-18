@@ -230,7 +230,7 @@ def delete_shop(
 
     _create_audit_log(
         db=db,
-        action_type=ActionType.SHOP_UPDATED,
+        action_type=ActionType.SHOP_DELETED,
         user_id=current_user.id,
         description=f"Soft-deleted shop '{shop.name}'",
         details={"name": shop.name, "code": shop.code},

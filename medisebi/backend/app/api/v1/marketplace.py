@@ -35,6 +35,7 @@ from app.models.salt import Salt
 from app.models.medicine import Medicine
 from app.models.inventory import Inventory
 from app.models.shop import Shop
+from app.models.shop_staff import ShopStaff
 from app.models.stock_transfer import (
     StockTransferRequest,
     TransferStatus,
@@ -118,7 +119,7 @@ def _get_shop_users(db: Session, shop_id: int) -> list[User]:
     users = db.execute(
         select(User)
         .join(User.shop_assignments)  # type: ignore[attr-defined]
-        .where(User.is_active == True)
+        .where(ShopStaff.shop_id == shop_id, User.is_active == True)
     ).scalars().all()
     # Also include all admins (they see everything)
     admins = db.execute(
@@ -633,6 +634,15 @@ def list_offers(
     ).scalars().all()
 
     items = []
+    # Batch fetch all medicines to avoid N+1 queries
+    med_ids = {t.med_id for t in transfers if t.med_id}
+    med_map: dict[int, Medicine] = {}
+    if med_ids:
+        medicines = db.execute(
+            select(Medicine).where(Medicine.id.in_(med_ids))
+        ).scalars().all()
+        med_map = {m.id: m for m in medicines}
+
     for t in transfers:
         resp = OfferResponse.model_validate(t)
         resp.priority = t.priority.value
@@ -641,9 +651,7 @@ def list_offers(
             resp.from_shop_name = t.from_shop.name
         if t.to_shop:
             resp.to_shop_name = t.to_shop.name
-        med = db.execute(
-            select(Medicine).where(Medicine.id == t.med_id)
-        ).scalar_one_or_none()
+        med = med_map.get(t.med_id)
         if med:
             resp.medicine_name = med.brand_name
             if med.salt:

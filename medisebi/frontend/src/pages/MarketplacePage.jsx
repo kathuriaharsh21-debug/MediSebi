@@ -3,9 +3,9 @@ import {
   Package, AlertTriangle, TrendingUp, Loader2, ChevronLeft, ChevronRight,
   Store, ShoppingBag, Handshake, LayoutDashboard, Filter, CheckCircle,
   XCircle, Clock, Tag, ArrowRight, BarChart3, Percent, Calendar,
-  Search, RefreshCw,
+  RefreshCw, Plus, X, Send,
 } from 'lucide-react';
-import { marketplaceAPI } from '../services/api';
+import { marketplaceAPI, shopsAPI, expiryAPI } from '../services/api';
 
 const TABS = [
   { key: 'Listings', label: 'Listings', icon: Tag },
@@ -144,7 +144,27 @@ export default function MarketplacePage() {
   const [dashboard, setDashboard] = useState(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
 
+  // Create Offer modal state
+  const [showCreateOffer, setShowCreateOffer] = useState(false);
+  const [createOfferForm, setCreateOfferForm] = useState({
+    from_shop_id: '',
+    to_shop_id: '',
+    inventory_item_id: '',
+    quantity: '',
+    price_per_unit: '',
+    notes: '',
+  });
+  const [createOfferLoading, setCreateOfferLoading] = useState(false);
+  const [createOfferError, setCreateOfferError] = useState('');
+  const [shops, setShops] = useState([]);
+  const [expiringItems, setExpiringItems] = useState([]);
+
   const pageSize = 15;
+
+  // Fetch shops on mount
+  useEffect(() => {
+    fetchShops();
+  }, []);
 
   // Fetch data on tab change
   useEffect(() => {
@@ -153,6 +173,68 @@ export default function MarketplacePage() {
     if (activeTab === 'Offers') fetchOffers();
     if (activeTab === 'Dashboard') fetchDashboard();
   }, [activeTab, listingsPage, offerStatusFilter, offersPage]);
+
+  // ─── Shops & Create Offer Handlers ───────
+  const fetchShops = async () => {
+    try {
+      const { data } = await shopsAPI.list({ size: 100 });
+      setShops(data?.items || []);
+    } catch (err) {
+      console.error('Failed to fetch shops:', err);
+    }
+  };
+
+  const fetchExpiringItems = async (shopId) => {
+    if (!shopId) {
+      setExpiringItems([]);
+      return;
+    }
+    try {
+      const { data } = await expiryAPI.items({ shop_id: shopId, severity: 'expired', size: 50 });
+      const items = data?.items || data || [];
+      setExpiringItems(Array.isArray(items) ? items : []);
+    } catch (err) {
+      console.error('Failed to fetch expiring items:', err);
+      setExpiringItems([]);
+    }
+  };
+
+  const handleCreateOffer = async (e) => {
+    e.preventDefault();
+    if (!createOfferForm.from_shop_id || !createOfferForm.to_shop_id || !createOfferForm.quantity) {
+      setCreateOfferError('Source shop, destination shop, and quantity are required.');
+      return;
+    }
+    if (createOfferForm.from_shop_id === createOfferForm.to_shop_id) {
+      setCreateOfferError('Source and destination shops must be different.');
+      return;
+    }
+    setCreateOfferLoading(true);
+    setCreateOfferError('');
+    try {
+      const payload = {
+        from_shop_id: parseInt(createOfferForm.from_shop_id),
+        to_shop_id: parseInt(createOfferForm.to_shop_id),
+        quantity: parseInt(createOfferForm.quantity),
+        notes: createOfferForm.notes || undefined,
+      };
+      if (createOfferForm.inventory_item_id) {
+        payload.inventory_item_id = parseInt(createOfferForm.inventory_item_id);
+      }
+      if (createOfferForm.price_per_unit) {
+        payload.price_per_unit = parseFloat(createOfferForm.price_per_unit);
+      }
+      await marketplaceAPI.createOffer(payload);
+      setShowCreateOffer(false);
+      setCreateOfferForm({ from_shop_id: '', to_shop_id: '', inventory_item_id: '', quantity: '', price_per_unit: '', notes: '' });
+      setExpiringItems([]);
+      if (activeTab === 'Offers') fetchOffers();
+    } catch (err) {
+      setCreateOfferError(err.response?.data?.detail || 'Failed to create offer. Please try again.');
+    } finally {
+      setCreateOfferLoading(false);
+    }
+  };
 
   // ─── Listings Handlers ──────────────────────
   const fetchListings = async () => {
@@ -306,6 +388,13 @@ export default function MarketplacePage() {
             Match expiring stock with demand, create offers, and optimize redistribution
           </p>
         </div>
+        <button
+          onClick={() => setShowCreateOffer(true)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-indigo-600/20"
+        >
+          <Plus className="w-4 h-4" />
+          Create Offer
+        </button>
       </div>
 
       {/* Tabs */}
@@ -796,6 +885,184 @@ export default function MarketplacePage() {
               </div>
             </>
           )}
+        </div>
+      )}
+      {/* ═══════════════════ CREATE OFFER MODAL ═══════════════════ */}
+      {showCreateOffer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowCreateOffer(false)} />
+          <div className="relative bg-slate-900 border border-slate-700/50 rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-indigo-500/15 flex items-center justify-center">
+                  <Send className="w-5 h-5 text-indigo-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-white">Create Marketplace Offer</h2>
+                  <p className="text-xs text-slate-400">Offer expiring inventory to another shop</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowCreateOffer(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Error */}
+            {createOfferError && (
+              <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                <p className="text-sm text-red-400">{createOfferError}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateOffer} className="space-y-4">
+              {/* Source Shop */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                  Source Shop <span className="text-red-400">*</span>
+                </label>
+                <select
+                  value={createOfferForm.from_shop_id}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCreateOfferForm({ ...createOfferForm, from_shop_id: val, inventory_item_id: '' });
+                    fetchExpiringItems(val);
+                  }}
+                  required
+                  className="w-full px-3 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
+                >
+                  <option value="">Select source shop</option>
+                  {shops.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Inventory Item (expiring items from source shop) */}
+              {expiringItems.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                    Inventory Item (optional)
+                  </label>
+                  <select
+                    value={createOfferForm.inventory_item_id}
+                    onChange={(e) => {
+                      const item = expiringItems.find((i) => String(i.id) === e.target.value);
+                      if (item) {
+                        setCreateOfferForm({
+                          ...createOfferForm,
+                          inventory_item_id: e.target.value,
+                          quantity: String(item.quantity || ''),
+                          price_per_unit: item.unit_price != null ? String(item.unit_price) : item.selling_price != null ? String(item.selling_price) : createOfferForm.price_per_unit,
+                        });
+                      } else {
+                        setCreateOfferForm({ ...createOfferForm, inventory_item_id: e.target.value });
+                      }
+                    }}
+                    className="w-full px-3 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
+                  >
+                    <option value="">Select an item</option>
+                    {expiringItems.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.brand_name || item.salt_name || `#${item.med_id}`} — {item.quantity || 0} units — Exp: {formatDate(item.expiry_date)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Destination Shop */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                  Destination Shop <span className="text-red-400">*</span>
+                </label>
+                <select
+                  value={createOfferForm.to_shop_id}
+                  onChange={(e) => setCreateOfferForm({ ...createOfferForm, to_shop_id: e.target.value })}
+                  required
+                  className="w-full px-3 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
+                >
+                  <option value="">Select destination shop</option>
+                  {shops
+                    .filter((s) => String(s.id) !== createOfferForm.from_shop_id)
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Quantity + Price row */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                    Quantity <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={createOfferForm.quantity}
+                    onChange={(e) => setCreateOfferForm({ ...createOfferForm, quantity: e.target.value })}
+                    required
+                    placeholder="e.g. 50"
+                    className="w-full px-3 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                    Price per Unit (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={createOfferForm.price_per_unit}
+                    onChange={(e) => setCreateOfferForm({ ...createOfferForm, price_per_unit: e.target.value })}
+                    placeholder="e.g. 25.00"
+                    className="w-full px-3 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                  Notes (optional)
+                </label>
+                <textarea
+                  value={createOfferForm.notes}
+                  onChange={(e) => setCreateOfferForm({ ...createOfferForm, notes: e.target.value })}
+                  placeholder="Add any additional notes..."
+                  rows={3}
+                  className="w-full px-3 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 resize-none"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCreateOffer(false);
+                    setCreateOfferError('');
+                  }}
+                  className="px-4 py-2.5 text-sm font-medium text-slate-400 hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={createOfferLoading}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-indigo-600/20"
+                >
+                  {createOfferLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {createOfferLoading ? 'Creating...' : 'Create Offer'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

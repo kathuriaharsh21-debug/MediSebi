@@ -76,18 +76,25 @@ export default function Dashboard() {
       .sort((a, b) => b.total - a.total);
   })();
 
-  // Pie chart data: medicine categories via salt
+  // Pie chart data: group by salt's category, fallback to top-5 salts + Other
   const categoryData = (() => {
     const catMap = {};
     data.medicines.forEach((med) => {
-      // We don't have category directly on medicine, use generic salt_name info
-      const salt = med.salt_name || 'Other';
-      catMap[salt] = (catMap[salt] || 0) + 1;
+      // Prefer the salt's category field if available, otherwise use salt_name
+      const cat = med.salt_category || med.category || 'Other';
+      catMap[cat] = (catMap[cat] || 0) + 1;
     });
-    return Object.entries(catMap)
+    const sorted = Object.entries(catMap)
       .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 8);
+      .sort((a, b) => b.value - a.value);
+    // If there are too many slices, keep top 5 and group rest as "Other"
+    if (sorted.length > 6) {
+      const top = sorted.slice(0, 5);
+      const otherValue = sorted.slice(5).reduce((sum, item) => sum + item.value, 0);
+      top.push({ name: 'Other', value: otherValue });
+      return top;
+    }
+    return sorted;
   })();
 
   // Custom tooltip for charts
@@ -215,7 +222,7 @@ export default function Dashboard() {
         <div className="bg-slate-900/80 border border-slate-700/50 rounded-xl p-6">
           <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
             <Package className="w-4 h-4 text-emerald-400" />
-            Medicine Salt Distribution
+            Medicine Category Distribution
           </h3>
           {categoryData.length > 0 ? (
             <ResponsiveContainer width="100%" height={300}>

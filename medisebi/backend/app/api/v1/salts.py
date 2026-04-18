@@ -155,7 +155,7 @@ def create_salt(
 
     _create_audit_log(
         db=db,
-        action_type=ActionType.MEDICINE_CREATED,  # Reuse: salt creation is akin to medicine-related
+        action_type=ActionType.SALT_CREATED,
         user_id=current_user.id,
         description=f"Created salt '{data.formula_name}'",
         details=data.model_dump(),
@@ -207,7 +207,7 @@ def update_salt(
 
     _create_audit_log(
         db=db,
-        action_type=ActionType.MEDICINE_UPDATED,
+        action_type=ActionType.SALT_UPDATED,
         user_id=current_user.id,
         description=f"Updated salt '{salt.formula_name}'",
         details=update_data,
@@ -245,7 +245,7 @@ def delete_salt(
 
     _create_audit_log(
         db=db,
-        action_type=ActionType.MEDICINE_DELETED,
+        action_type=ActionType.SALT_DELETED,
         user_id=current_user.id,
         description=f"Soft-deleted salt '{salt.formula_name}'",
         details={"formula_name": salt.formula_name},

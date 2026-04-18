@@ -5,12 +5,17 @@ SQLAlchemy engine and session factory with lazy initialization.
 The engine is created on first access to avoid import-time DB connection errors.
 """
 
+import os
+import logging
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from sqlalchemy.pool import QueuePool, StaticPool
 from typing import Generator
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -38,11 +43,20 @@ def get_engine():
     """
     global _engine
     if _engine is None:
-        import os
-        # Always use a local SQLite DB within the project directory
-        # This ensures the app works regardless of environment variable overrides
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        db_url = f"sqlite:///{os.path.join(project_root, 'medisebi_dev.db')}"
+        db_url = settings.DATABASE_URL
+
+        # Validate the URL is parseable; fall back to local SQLite if not
+        try:
+            from sqlalchemy import make_url
+            make_url(db_url)
+        except Exception:
+            fallback = "sqlite:///./medisebi_dev.db"
+            logger.warning(
+                "DATABASE_URL '%s' is not a valid SQLAlchemy URL — falling back to %s",
+                db_url, fallback,
+            )
+            db_url = fallback
+
         if db_url.startswith("sqlite"):
             # SQLite-compatible settings
             connect_args = {"check_same_thread": False}

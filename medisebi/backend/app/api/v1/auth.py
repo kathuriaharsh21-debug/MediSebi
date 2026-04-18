@@ -10,7 +10,7 @@ Security Features:
 - Audit logging for all authentication events
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -126,23 +126,49 @@ def login(
 
     # Check if account is locked
     if user.is_locked:
-        _create_audit_log(
-            db=db,
-            action_type=ActionType.USER_LOGIN,
-            user_id=user.id,
-            description=f"Login attempt while account locked for user '{user.username}'",
-            ip_address=ip_address,
-            user_agent=user_agent,
-        )
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"Account is locked due to too many failed login attempts. "
-                f"Try again after {settings.ACCOUNT_LOCKOUT_DURATION_MINUTES} minutes "
-                f"or contact an administrator."
-            ),
-        )
+        # Auto-unlock if lockout duration has passed
+        if user.locked_at:
+            lockout_delta = timedelta(minutes=settings.ACCOUNT_LOCKOUT_DURATION_MINUTES)
+            if datetime.now(timezone.utc) >= user.locked_at + lockout_delta:
+                user.is_locked = False
+                user.failed_login_attempts = 0
+                user.locked_at = None
+            else:
+                _create_audit_log(
+                    db=db,
+                    action_type=ActionType.USER_LOGIN,
+                    user_id=user.id,
+                    description=f"Login attempt while account locked for user '{user.username}'",
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=(
+                        f"Account is locked due to too many failed login attempts. "
+                        f"Try again after {settings.ACCOUNT_LOCKOUT_DURATION_MINUTES} minutes "
+                        f"or contact an administrator."
+                    ),
+                )
+        else:
+            _create_audit_log(
+                db=db,
+                action_type=ActionType.USER_LOGIN,
+                user_id=user.id,
+                description=f"Login attempt while account locked for user '{user.username}'",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"Account is locked due to too many failed login attempts. "
+                    f"Try again after {settings.ACCOUNT_LOCKOUT_DURATION_MINUTES} minutes "
+                    f"or contact an administrator."
+                ),
+            )
 
     # Verify password
     if not verify_password(body.password, user.password_hash):
@@ -151,6 +177,7 @@ def login(
 
         if user.failed_login_attempts >= settings.ACCOUNT_LOCKOUT_THRESHOLD:
             user.is_locked = True
+            user.locked_at = datetime.now(timezone.utc)
             _create_audit_log(
                 db=db,
                 action_type=ActionType.USER_LOCKED,
@@ -196,7 +223,7 @@ def login(
         token_hash=refresh_hash,
         token_family_id=family_id,
         user_id=user.id,
-        expires_at=datetime.now(timezone.utc) + __import__("datetime").timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
         device_fingerprint=generate_device_fingerprint(user_agent, ip_address),
         ip_address=ip_address,
         user_agent=user_agent,
@@ -336,7 +363,7 @@ def refresh_token(
         token_hash=new_refresh_hash,
         token_family_id=stored_token.token_family_id,
         user_id=stored_token.user_id,
-        expires_at=now + __import__("datetime").timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        expires_at=now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
         device_fingerprint=generate_device_fingerprint(client["user_agent"], client["ip_address"]),
         ip_address=client["ip_address"],
         user_agent=client["user_agent"],

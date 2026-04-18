@@ -100,6 +100,11 @@ async def list_forecast_items(
             func.sum(DemandForecast.predicted_demand) > func.min(DemandForecast.current_stock)
         )
 
+    if min_confidence is not None:
+        query = query.having(
+            func.avg(DemandForecast.confidence_score) >= min_confidence
+        )
+
     # Count total
     count_query = select(func.count()).select_from(query.subquery())
     total = db.execute(count_query).scalar() or 0
@@ -115,21 +120,37 @@ async def list_forecast_items(
 
     rows = db.execute(query).all()
 
+    # Batch fetch all medicines, shops, and salts to avoid N+1 queries
+    med_ids = {row.med_id for row in rows if row.med_id}
+    shop_ids = {row.shop_id for row in rows if row.shop_id}
+    med_map: dict = {}
+    shop_map: dict = {}
+    salt_map: dict = {}
+
+    if med_ids:
+        medicines = db.execute(select(Medicine).where(Medicine.id.in_(med_ids))).scalars().all()
+        med_map = {m.id: m for m in medicines}
+        salt_ids = {m.salt_id for m in medicines if m.salt_id}
+        if salt_ids:
+            salts = db.execute(select(Salt).where(Salt.id.in_(salt_ids))).scalars().all()
+            salt_map = {s.id: s for s in salts}
+
+    if shop_ids:
+        shops = db.execute(select(Shop).where(Shop.id.in_(shop_ids))).scalars().all()
+        shop_map = {s.id: s for s in shops}
+
     items = []
     for row in rows:
-        med = db.execute(select(Medicine).where(Medicine.id == row.med_id)).scalar_one_or_none()
-        shop = db.execute(select(Shop).where(Shop.id == row.shop_id)).scalar_one_or_none()
+        med = med_map.get(row.med_id)
+        shop = shop_map.get(row.shop_id)
         predicted = int(row.total_predicted or 0)
         stock = int(row.current_stock or 0)
         confidence = float(row.avg_confidence or 0)
 
-        if min_confidence is not None and confidence < min_confidence:
-            continue
-
         salt_name = None
         category = None
-        if med:
-            salt = db.execute(select(Salt).where(Salt.id == med.salt_id)).scalar_one_or_none()
+        if med and med.salt_id:
+            salt = salt_map.get(med.salt_id)
             if salt:
                 salt_name = salt.formula_name
                 category = salt.category

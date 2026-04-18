@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Activity, Eye, EyeOff, Loader2 } from 'lucide-react';
 
@@ -8,12 +9,16 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { login, error } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     try {
       await login(username, password);
+      const from = location.state?.from?.pathname || '/';
+      navigate(from, { replace: true });
     } catch {
       // Error handled in context
     } finally {

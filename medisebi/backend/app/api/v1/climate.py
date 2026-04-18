@@ -198,6 +198,13 @@ def shop_weather(
     from app.services.climate_engine import assess_disease_risks
     risks = assess_disease_risks(weather)
 
+    # Determine data source safely
+    try:
+        raw = json.loads(weather.get("raw_response") or "{}")
+        data_source = "simulated" if raw.get("simulated") is True else "openweather_api"
+    except (json.JSONDecodeError, TypeError, ValueError):
+        data_source = "openweather_api"
+
     return {
         "shop_id": shop_id,
         "shop_name": shop.name,
@@ -208,11 +215,7 @@ def shop_weather(
             "temperature_c": weather["temperature_c"],
             "humidity_pct": weather["humidity_pct"],
             "weather_condition": weather["weather_condition"],
-            "data_source": (
-                "openweather_api"
-                if json.loads(weather.get("raw_response", "{}")).get("simulated") is not True
-                else "simulated"
-            ),
+            "data_source": data_source,
         },
         "disease_risks": [
             {

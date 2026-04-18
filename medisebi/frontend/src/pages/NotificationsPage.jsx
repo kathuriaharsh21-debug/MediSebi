@@ -4,7 +4,6 @@ import {
   AlertCircle, Info, Loader2, RefreshCw, CheckCheck,
 } from 'lucide-react';
 import { notificationsAPI } from '../services/api';
-import api from '../services/api';
 
 // ─── Constants ──────────────────────────────────────
 const SEVERITY_CONFIG = {

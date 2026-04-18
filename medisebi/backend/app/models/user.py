@@ -84,6 +84,11 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
         nullable=False,
         comment="Counter for consecutive failed login attempts",
     )
+    locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when the account was locked due to failed login attempts",
+    )
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
