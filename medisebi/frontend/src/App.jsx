@@ -18,6 +18,8 @@ const TransfersPage = React.lazy(() => import('./pages/TransfersPage'));
 const MarketplacePage = React.lazy(() => import('./pages/MarketplacePage'));
 const CatalogPage = React.lazy(() => import('./pages/CatalogPage'));
 const NotificationsPage = React.lazy(() => import('./pages/NotificationsPage'));
+const BillingPage = React.lazy(() => import('./pages/BillingPage'));
+const AnalyticsPage = React.lazy(() => import('./pages/AnalyticsPage'));
 
 function PageLoader() {
   return (
@@ -55,6 +57,8 @@ export default function App() {
               <Route path="/transfers" element={<TransfersPage />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/catalog" element={<CatalogPage />} />
+              <Route path="/billing" element={<BillingPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

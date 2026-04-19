@@ -35,10 +35,11 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ── CORS Middleware ──────────────────────────────────────
+    # Parse CORS origins from comma-separated string
+    cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Restrict in production
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

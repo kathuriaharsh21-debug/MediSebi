@@ -26,6 +26,7 @@ from app.models.climate_alert import ClimateAlert, RiskLevel
 from app.models.refresh_token import RefreshToken
 from app.models.password_history import PasswordHistory
 from app.models.notification import Notification, NotificationSeverity, NotificationSource
+from app.models.bill import Bill, BillItem, PaymentMethod, BillStatus
 
 # ── Public API ─────────────────────────────────────────────────
 __all__ = [
@@ -54,4 +55,9 @@ __all__ = [
     "Notification",
     "NotificationSeverity",
     "NotificationSource",
+    # Billing Models
+    "Bill",
+    "BillItem",
+    "PaymentMethod",
+    "BillStatus",
 ]

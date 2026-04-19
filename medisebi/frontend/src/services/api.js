@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = '/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -204,9 +204,26 @@ export const catalogAPI = {
   stockCheck: (shopId) => api.get(`/catalog/stock-check/${shopId}`),
 };
 
+// ─── Billing ──────────────────────────────────
+export const billingAPI = {
+  create: (data) => api.post('/bills/', data),
+  list: (params) => api.get('/bills/', { params }),
+  get: (id) => api.get(`/bills/${id}`),
+  todayBills: (shopId) => api.get(`/bills/shop/${shopId}/today`),
+  revenue: (shopId, params) => api.get(`/bills/shop/${shopId}/revenue`, { params }),
+  cancel: (id) => api.put(`/bills/${id}/cancel`),
+};
+
 // ─── Notifications ────────────────────────────
 export const notificationsAPI = {
   list: () => api.get('/notifications/'),
+};
+
+// ─── Analytics ───────────────────────────────
+export const analyticsAPI = {
+  seasonal: (params) => api.get('/analytics/seasonal', { params }),
+  frequency: (params) => api.get('/analytics/frequency', { params }),
+  orderingGuide: (params) => api.get('/analytics/ordering-guide', { params }),
 };
 
 export default api;

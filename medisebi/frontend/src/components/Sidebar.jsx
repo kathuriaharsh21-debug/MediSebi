@@ -14,6 +14,8 @@ import {
   BookOpen,
   Bell,
   X,
+  Receipt,
+  BarChart3,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -34,7 +36,9 @@ const intelligenceItems = [
 ];
 
 const toolItems = [
+  { path: '/billing', label: 'Billing', icon: Receipt },
   { path: '/catalog', label: 'Medicine Catalog', icon: BookOpen },
+  { path: '/analytics', label: 'Analytics', icon: BarChart3 },
 ];
 
 function NavGroup({ items, location, onClose }) {

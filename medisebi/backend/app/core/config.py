@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     DATABASE_POOL_TIMEOUT: int = 30
     DATABASE_ECHO: bool = False  # Set True for SQL query logging
 
+    # ── CORS (for separate frontend/backend deployment) ──
+    CORS_ORIGINS: str = Field(
+        default="*",
+        description="Comma-separated list of allowed CORS origins. Use '*' for development only."
+    )
+
     # ── OpenWeather API ──────────────────────────────────────
     OPENWEATHER_API_KEY: Optional[str] = None
     OPENWEATHER_BASE_URL: str = "https://api.openweathermap.org/data/2.5"

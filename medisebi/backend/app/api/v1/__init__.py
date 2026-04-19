@@ -19,6 +19,8 @@ from app.api.v1.forecast import router as forecast_router
 from app.api.v1.catalog import router as catalog_router
 from app.api.v1.marketplace import router as marketplace_router
 from app.api.v1.notifications import router as notifications_router
+from app.api.v1.billing import router as billing_router
+from app.api.v1.analytics import router as analytics_router
 
 api_router = APIRouter()
 
@@ -36,3 +38,5 @@ api_router.include_router(forecast_router, prefix="/forecast", tags=["Demand For
 api_router.include_router(catalog_router, prefix="/catalog", tags=["Medicine Catalog"])
 api_router.include_router(marketplace_router, prefix="/marketplace", tags=["Marketplace"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["Notifications"])
+api_router.include_router(billing_router, prefix="/bills", tags=["Billing"])
+api_router.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
