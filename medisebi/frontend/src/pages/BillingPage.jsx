@@ -312,15 +312,8 @@ export default function BillingPage() {
         items: validItems.map((item) => ({
           inventory_id: parseInt(item.inventory_id),
           quantity: parseInt(item.quantity),
-          unit_price: item.unitPrice,
-          gst_percent: item.gstPercent,
+          discount: parseFloat(item.discount) || 0,
         })),
-        subtotal: billTotals.subtotal,
-        total_gst: billTotals.totalGST,
-        total_cgst: billTotals.totalCGST,
-        total_sgst: billTotals.totalSGST,
-        discount_amount: billTotals.discount,
-        grand_total: billTotals.grandTotal,
       };
 
       const { data } = await billingAPI.create(payload);
