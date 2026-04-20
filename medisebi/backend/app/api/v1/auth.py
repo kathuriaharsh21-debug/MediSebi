@@ -40,6 +40,7 @@ from app.auth.dependencies import (
     get_client_info,
 )
 from app.schemas.auth import (
+    RegisterRequest,
     LoginRequest,
     LoginResponse,
     RefreshRequest,
@@ -94,6 +95,117 @@ def _create_audit_log(
     db.add(entry)
     db.flush()
     return entry
+
+
+# ════════════════════════════════════════════════════════════════
+# POST /auth/register
+# ════════════════════════════════════════════════════════════════
+
+@router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
+def register(
+    body: RegisterRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Register a new user and return JWT tokens (auto-login after registration).
+
+    Validates:
+    1. Username and email are unique.
+    2. Password meets policy requirements.
+    3. Role is a valid UserRole enum value.
+    """
+    client = get_client_info(request)
+
+    # Check unique username
+    existing_user = db.query(User).filter(User.username == body.username).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Username '{body.username}' is already taken.",
+        )
+
+    # Check unique email
+    existing_email = db.query(User).filter(User.email == body.email).first()
+    if existing_email:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email address is already registered.",
+        )
+
+    # Validate password policy
+    validation = PasswordValidator.validate(body.password)
+    if not validation.is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": "Password does not meet policy requirements.", "errors": validation.errors},
+        )
+
+    # Validate role
+    try:
+        user_role = UserRole(body.role.lower())
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid role: '{body.role}'. Must be one of: admin, pharmacist, viewer.",
+        )
+
+    # Create user
+    new_user = User(
+        username=body.username,
+        email=body.email,
+        full_name=body.full_name,
+        password_hash=hash_password(body.password),
+        role=user_role,
+        is_active=True,
+    )
+    db.add(new_user)
+    db.flush()  # Get the user ID
+
+    # Create tokens (auto-login)
+    access_token = create_access_token(data={"sub": str(new_user.id)})
+    refresh_raw, refresh_hash = create_refresh_token_for_user(new_user.id)
+
+    family_id = generate_token_family_id()
+    refresh_token_record = RefreshToken(
+        token_hash=refresh_hash,
+        token_family_id=family_id,
+        user_id=new_user.id,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        device_fingerprint=generate_device_fingerprint(client["user_agent"], client["ip_address"]),
+        ip_address=client["ip_address"],
+        user_agent=client["user_agent"],
+    )
+    db.add(refresh_token_record)
+
+    # Audit log
+    _create_audit_log(
+        db=db,
+        action_type=ActionType.USER_CREATED,
+        user_id=new_user.id,
+        description=f"User '{new_user.username}' registered with role '{user_role.value}'.",
+        resource_type="user",
+        resource_id=new_user.id,
+        ip_address=client["ip_address"],
+        user_agent=client["user_agent"],
+    )
+
+    db.commit()
+
+    return LoginResponse(
+        access_token=access_token,
+        refresh_token=refresh_raw,
+        token_type="Bearer",
+        user=UserInfo(
+            id=new_user.id,
+            username=new_user.username,
+            email=new_user.email,
+            full_name=new_user.full_name,
+            role=new_user.role.value,
+            is_active=new_user.is_active,
+            mfa_enabled=new_user.mfa_enabled,
+        ),
+    )
 
 
 # ════════════════════════════════════════════════════════════════

@@ -49,6 +49,23 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const register = async ({ username, email, full_name, password, role }) => {
+    setError(null);
+    try {
+      const { data } = await authAPI.register({ username, email, full_name, password, role });
+      localStorage.setItem('access_token', data.access_token);
+      localStorage.setItem('refresh_token', data.refresh_token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      setUser(data.user);
+      return data.user;
+    } catch (err) {
+      const message =
+        err.response?.data?.detail || 'Registration failed. Please try again.';
+      setError(message);
+      throw new Error(message);
+    }
+  };
+
   const logout = useCallback(() => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
@@ -61,7 +78,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, error, login, logout, isAdmin, isPharmacist }}
+      value={{ user, loading, error, login, register, logout, isAdmin, isPharmacist }}
     >
       {children}
     </AuthContext.Provider>

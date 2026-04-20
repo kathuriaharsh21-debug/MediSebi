@@ -1,18 +1,21 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Activity, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Activity, Eye, EyeOff, Loader2, UserPlus, LogIn } from 'lucide-react';
 
 export default function LoginPage() {
+  const [isRegister, setIsRegister] = useState(false);
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { login, error } = useAuth();
+  const { login, register, error } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     try {
@@ -24,6 +27,34 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      await register({
+        username,
+        email,
+        full_name: fullName,
+        password,
+        role: 'admin',
+      });
+      const from = location.state?.from?.pathname || '/';
+      navigate(from, { replace: true });
+    } catch {
+      // Error handled in context
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const switchMode = () => {
+    setIsRegister(!isRegister);
+    setUsername('');
+    setEmail('');
+    setFullName('');
+    setPassword('');
   };
 
   return (
@@ -38,108 +69,163 @@ export default function LoginPage() {
           <p className="text-slate-400 mt-1">Pharmacy Intelligence Platform</p>
         </div>
 
-        {/* Login card */}
+        {/* Card */}
         <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
-          <h2 className="text-xl font-semibold text-white mb-1">Welcome back</h2>
-          <p className="text-sm text-slate-400 mb-6">Sign in to your account</p>
+          <h2 className="text-xl font-semibold text-white mb-1">
+            {isRegister ? 'Create account' : 'Welcome back'}
+          </h2>
+          <p className="text-sm text-slate-400 mb-6">
+            {isRegister ? 'Register a new account' : 'Sign in to your account'}
+          </p>
 
           {error && (
             <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-              <p className="text-sm text-red-400">{error}</p>
+              <p className="text-sm text-red-400">{typeof error === 'string' ? error : JSON.stringify(error)}</p>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">
-                Email / Username
-              </label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="admin@medisebi.com"
-                required
-                className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">
-                Password
-              </label>
-              <div className="relative">
+          {isRegister ? (
+            <form onSubmit={handleRegister} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">Username</label>
                 <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Choose a username"
                   required
-                  className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all pr-10"
+                  minLength={3}
+                  className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-300"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
               </div>
-            </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">Full Name</label>
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Your full name"
+                  required
+                  className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                  className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">Password</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Min 8 chars, uppercase, digit, special"
+                    required
+                    minLength={8}
+                    className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-300"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white font-medium rounded-lg transition-colors duration-150 flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Creating account...
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-4 h-4" />
+                    Create Account
+                  </>
+                )}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                  Email / Username
+                </label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="admin@medisebi.com"
+                  required
+                  className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                  Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    required
+                    className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-300"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white font-medium rounded-lg transition-colors duration-150 flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Signing in...
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-4 h-4" />
+                    Sign In
+                  </>
+                )}
+              </button>
+            </form>
+          )}
 
+          {/* Toggle register/login */}
+          <div className="mt-6 text-center">
             <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white font-medium rounded-lg transition-colors duration-150 flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20"
+              onClick={switchMode}
+              className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
             >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Signing in...
-                </>
-              ) : (
-                'Sign In'
-              )}
+              {isRegister
+                ? 'Already have an account? Sign in'
+                : "Don't have an account? Register now"}
             </button>
-          </form>
-
-          {/* Demo credentials */}
-          <div className="mt-6 pt-5 border-t border-slate-700/50">
-            <p className="text-xs text-slate-500 mb-3 uppercase tracking-wider font-medium">
-              Demo Credentials
-            </p>
-            <div className="space-y-2">
-              <div
-                onClick={() => {
-                  setUsername('admin@medisebi.com');
-                  setPassword('Admin@12345!');
-                }}
-                className="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/50 border border-slate-700/30 cursor-pointer hover:border-indigo-500/30 transition-colors"
-              >
-                <div>
-                  <p className="text-xs font-medium text-slate-300">Admin</p>
-                  <p className="text-[11px] text-slate-500">admin@medisebi.com</p>
-                </div>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 font-medium">
-                  ADMIN
-                </span>
-              </div>
-              <div
-                onClick={() => {
-                  setUsername('pharm1@medisebi.com');
-                  setPassword('Pharm@12345!');
-                }}
-                className="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/50 border border-slate-700/30 cursor-pointer hover:border-emerald-500/30 transition-colors"
-              >
-                <div>
-                  <p className="text-xs font-medium text-slate-300">Pharmacist</p>
-                  <p className="text-[11px] text-slate-500">pharm1@medisebi.com</p>
-                </div>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-medium">
-                  PHARM
-                </span>
-              </div>
-            </div>
           </div>
         </div>
 

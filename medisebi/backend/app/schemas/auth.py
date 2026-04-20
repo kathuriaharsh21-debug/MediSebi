@@ -9,6 +9,40 @@ from pydantic import BaseModel, Field
 
 # ── Request Schemas ─────────────────────────────────────────────
 
+class RegisterRequest(BaseModel):
+    """Registration data submitted by a new user."""
+    username: str = Field(
+        ...,
+        min_length=3,
+        max_length=50,
+        description="Unique username",
+        examples=["pharmacist1"],
+    )
+    email: str = Field(
+        ...,
+        max_length=100,
+        description="Email address",
+        examples=["user@example.com"],
+    )
+    full_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Full display name",
+        examples=["John Doe"],
+    )
+    password: str = Field(
+        ...,
+        min_length=1,
+        description="Password (must meet policy requirements)",
+        examples=["SecureP@ssw0rd!"],
+    )
+    role: str = Field(
+        "viewer",
+        description="User role: admin, pharmacist, viewer",
+    )
+
+
 class LoginRequest(BaseModel):
     """Login credentials submitted by the user."""
     username: str = Field(
