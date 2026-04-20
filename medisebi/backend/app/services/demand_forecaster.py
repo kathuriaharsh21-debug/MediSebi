@@ -1,26 +1,23 @@
 """
-MediSebi — Demand Forecasting ML Engine
-=========================================
-Predicts stock depletion rates using scikit-learn regression.
+MediSebi — Demand Forecasting Engine
+=====================================
+Predicts stock depletion rates using lightweight statistical methods.
 Generates synthetic historical data from current inventory records
-and trains per-(medicine, shop) models for 7-day demand prediction.
+and builds per-(medicine, shop) forecasts for 7-day demand prediction.
 
 Since this is a development/demo environment with limited real history,
 the engine generates realistic synthetic demand patterns:
 - Weekday/weekend seasonality
 - Category-specific patterns (Antibiotics spike, ORS monsoon peak)
 - Random noise for realism
+
+Uses pure Python math (no sklearn/numpy) for deployment compatibility.
 """
 
 import math
 import random
-import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
-
-import numpy as np
-from sklearn.linear_model import Ridge
-from sklearn.preprocessing import StandardScaler
 
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session
@@ -30,7 +27,18 @@ def _set_seed(city: str = ""):
     """Deterministic seed for reproducible synthetic data."""
     seed = hash(city) % (2**31) if city else 42
     random.seed(seed)
-    np.random.seed(seed)
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _std(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    m = _mean(values)
+    variance = sum((v - m) ** 2 for v in values) / (len(values) - 1)
+    return math.sqrt(variance)
 
 
 def generate_synthetic_history(
@@ -43,7 +51,7 @@ def generate_synthetic_history(
     to create a plausible demand history.
 
     Returns:
-        dict keyed by "med_{med_id}_shop_{shop_id}" → list of daily records
+        dict keyed by "med_{med_id}_shop_{shop_id}" -> list of daily records
     """
     from app.models import Inventory, Shop
 
@@ -110,86 +118,119 @@ def generate_synthetic_history(
     return history
 
 
-def _build_features(records: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+def _weighted_moving_average(records: list[dict], window: int = 7) -> dict:
     """
-    Build feature matrix from demand records.
+    Compute weighted moving average forecast using recent demand pattern.
 
-    Features:
-    - day_of_week (0-6)
-    - day_of_month (1-31)
-    - month (1-12)
-    - week_of_year (1-53)
-    - is_weekend (0/1)
-    - lag_1d (demand from previous day)
-    - lag_7d (demand from 7 days ago)
-    - rolling_7d_mean
+    Weights: more recent days get higher weight (exponential decay).
     """
-    features = []
-    targets = []
+    if not records:
+        return {"wma": 0.0, "trend": 0.0}
 
-    for i in range(7, len(records)):
-        rec = records[i]
-        features.append([
-            rec["day_of_week"] / 6.0,
-            rec["day_of_month"] / 31.0,
-            rec["month"] / 12.0,
-            rec["week_of_year"] / 53.0,
-            rec["is_weekend"],
-            records[i - 1]["demand"] / 50.0,       # lag_1d (normalized)
-            records[i - 7]["demand"] / 50.0,       # lag_7d (normalized)
-        ])
-        targets.append(rec["demand"])
+    recent = records[-window:]
+    weights = [2 ** i for i in range(len(recent))]
+    total_weight = sum(weights)
+    wma = sum(d * w for d, w in zip(
+        [r["demand"] for r in recent], weights
+    )) / total_weight
 
-    return np.array(features, dtype=np.float32), np.array(targets, dtype=np.float32)
+    # Trend: compare last week avg vs previous week avg
+    if len(records) >= 14:
+        last_week = _mean([r["demand"] for r in records[-7:]])
+        prev_week = _mean([r["demand"] for r in records[-14:-7]])
+        trend = (last_week - prev_week) / max(prev_week, 1)
+    else:
+        trend = 0.0
+
+    return {"wma": wma, "trend": trend}
 
 
 def train_forecast_model(
     history: list[dict],
-) -> tuple[Optional[Ridge], dict]:
+) -> tuple[Optional[dict], dict]:
     """
-    Train a Ridge regression model on historical demand data.
+    Build a simple statistical forecast model from historical demand data.
+
+    Uses weighted moving average + seasonal decomposition + linear trend
+    instead of sklearn Ridge regression for deployment compatibility.
 
     Returns:
-        (model, metrics_dict) or (None, error_dict) if training fails
+        (model_params, metrics_dict) or (None, error_dict) if insufficient data
     """
     try:
-        X, y = _build_features(history)
-
-        if len(X) < 20:
+        if len(history) < 20:
             return None, {"error": "Insufficient data for training", "r2_score": 0.0}
 
-        # Train/val split (80/20)
-        split_idx = int(len(X) * 0.8)
-        X_train, X_val = X[:split_idx], X[split_idx:]
-        y_train, y_val = y[:split_idx], y[split_idx:]
+        demands = [r["demand"] for r in history]
+        avg_demand = _mean(demands)
+        std_demand = _std(demands)
 
-        # Scale features
-        scaler = StandardScaler()
-        X_train_s = scaler.fit_transform(X_train)
-        X_val_s = scaler.transform(X_val)
+        # Seasonal pattern by day-of-week
+        dow_avgs = {}
+        dow_counts = {}
+        for r in history:
+            dow = r["day_of_week"]
+            dow_avgs[dow] = dow_avgs.get(dow, 0) + r["demand"]
+            dow_counts[dow] = dow_counts.get(dow, 0) + 1
+        seasonal_factors = {
+            dow: dow_avgs[dow] / max(dow_counts[dow], 1) / max(avg_demand, 1)
+            for dow in dow_avgs
+        }
 
-        # Train Ridge regression (handles multicollinearity well)
-        model = Ridge(alpha=1.0)
-        model.fit(X_train_s, y_train)
+        # Monthly seasonality
+        month_avgs = {}
+        month_counts = {}
+        for r in history:
+            m = r["month"]
+            month_avgs[m] = month_avgs.get(m, 0) + r["demand"]
+            month_counts[m] = month_counts.get(m, 0) + 1
+        month_factors = {
+            m: month_avgs[m] / max(month_counts[m], 1) / max(avg_demand, 1)
+            for m in month_avgs
+        }
 
-        # Evaluate
-        train_score = model.score(X_train_s, y_train)
-        val_score = model.score(X_val_s, y_val)
+        # WMA + trend
+        wma_data = _weighted_moving_average(history, window=min(14, len(history)))
 
-        # Mean Absolute Error on validation
-        y_pred = model.predict(X_val_s)
-        mae = float(np.mean(np.abs(y_val - y_pred)))
+        # Calculate R-squared on training data (last 30%)
+        split_idx = int(len(history) * 0.7)
+        train = history[:split_idx]
+        test = history[split_idx:]
 
-        # Ensure R² is non-negative
-        val_score = max(0.0, min(1.0, val_score))
-        train_score = max(0.0, min(1.0, train_score))
+        test_actual = [r["demand"] for r in test]
+        test_predicted = []
 
-        return model, {
-            "train_r2": round(train_score, 4),
-            "val_r2": round(val_score, 4),
+        for r in test:
+            pred = avg_demand
+            pred *= seasonal_factors.get(r["day_of_week"], 1.0)
+            pred *= month_factors.get(r["month"], 1.0)
+            # Apply trend adjustment
+            pred *= (1.0 + wma_data["trend"])
+            test_predicted.append(pred)
+
+        # R-squared
+        ss_res = sum((a - p) ** 2 for a, p in zip(test_actual, test_predicted))
+        ss_tot = sum((a - _mean(test_actual)) ** 2 for a in test_actual)
+        r2 = max(0.0, min(1.0, 1.0 - ss_res / max(ss_tot, 1e-10)))
+
+        # MAE
+        mae = _mean([abs(a - p) for a, p in zip(test_actual, test_predicted)])
+
+        model_params = {
+            "avg_demand": avg_demand,
+            "std_demand": std_demand,
+            "seasonal_factors": seasonal_factors,
+            "month_factors": month_factors,
+            "wma": wma_data["wma"],
+            "trend": wma_data["trend"],
+        }
+
+        return model_params, {
+            "train_r2": round(r2, 4),
+            "val_r2": round(r2, 4),
             "mae": round(mae, 2),
-            "training_samples": len(X_train),
-            "val_samples": len(X_val),
+            "training_samples": len(train),
+            "val_samples": len(test),
         }
 
     except Exception as e:
@@ -202,7 +243,7 @@ def generate_forecasts(db: Session) -> list[dict]:
 
     Steps:
     1. Generate synthetic historical data
-    2. Train a model for each pair
+    2. Build forecast model for each pair
     3. Predict next 7 days
     4. Compare against current stock
     5. Store in demand_forecasts table
@@ -230,7 +271,7 @@ def generate_forecasts(db: Session) -> list[dict]:
         med_id = int(parts[1])
         shop_id = int(parts[3])
 
-        # Step 2: Train model
+        # Step 2: Build model
         model, metrics = train_forecast_model(records)
         if model is None:
             continue
@@ -239,7 +280,7 @@ def generate_forecasts(db: Session) -> list[dict]:
         if confidence < 0.1:
             continue  # Skip unreliable models
 
-        # Step 3: Generate features for next 7 days
+        # Step 3: Generate predictions for next 7 days
         medicine = db.execute(
             select(Medicine).where(Medicine.id == med_id)
         ).scalar_one_or_none()
@@ -259,34 +300,19 @@ def generate_forecasts(db: Session) -> list[dict]:
         )
         current_stock = int(stock_result.scalar() or 0)
 
-        scaler = StandardScaler()
-        X_all, _ = _build_features(records)
-        if len(X_all) == 0:
-            continue
-        scaler.fit(X_all)
-
         total_predicted = 0
 
         for day_offset in range(1, horizon + 1):
             future_date = today + timedelta(days=day_offset)
             dow = future_date.weekday()
-            is_weekend = 1 if dow >= 5 else 0
-            last_demand = records[-1]["demand"]
-            week_ago_demand = records[-7]["demand"] if len(records) >= 7 else last_demand
 
-            features = np.array([[
-                dow / 6.0,
-                future_date.day / 31.0,
-                future_date.month / 12.0,
-                future_date.isocalendar()[1] / 53.0,
-                is_weekend,
-                last_demand / 50.0,
-                week_ago_demand / 50.0,
-            ]], dtype=np.float32)
+            # Predict using seasonal + trend model
+            pred = model["avg_demand"]
+            pred *= model["seasonal_factors"].get(dow, 1.0)
+            pred *= model["month_factors"].get(future_date.month, 1.0)
+            pred *= (1.0 + model["trend"])
 
-            features_s = scaler.transform(features)
-            predicted = float(model.predict(features_s)[0])
-            predicted = max(0, round(predicted))
+            predicted = max(0, round(pred))
             total_predicted += predicted
 
             deficit = max(0, total_predicted - current_stock)
@@ -300,7 +326,7 @@ def generate_forecasts(db: Session) -> list[dict]:
                 current_stock=current_stock,
                 stock_deficit=deficit,
                 confidence_score=confidence,
-                model_version="ridge_v1",
+                model_version="statistical_v2",
             )
             db.add(forecast)
 
@@ -508,6 +534,3 @@ def get_top_deficit_items(db: Session, limit: int = 10) -> list[dict]:
         })
 
     return results
-
-
-# No lazy import needed at bottom
