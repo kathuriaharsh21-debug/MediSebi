@@ -112,4 +112,28 @@ Stage Summary:
 - Frontend: 13 pages total (6 original + 7 new), dark theme with Recharts
 - Database: 159 inventory entries across 8 shops, 35 salts, 37 medicines
 - Verified: Expiry Watchdog (56 alerts), Climate Intel (10 alerts), Demand Forecast (96 pairs), Redistribution (75 opportunities), Marketplace (52 listings, 241 matches), Catalog (61 medicines)
-EOF
+EOF---
+Task ID: 1
+Agent: Main Agent
+Task: Fix frontend login failure on deployed MediSebi platform
+
+Work Log:
+- Diagnosed 4 root causes for login failure on live deployment
+- Root Cause 1: Empty database on Render (no users = can't login) - Fixed by adding _auto_seed_if_empty() in main.py lifespan
+- Root Cause 2: passlib 1.7.4 incompatible with bcrypt 5.x - Fixed by rewriting password.py to use bcrypt directly, pinned bcrypt<5.0.0
+- Root Cause 3: CORS_ORIGINS on Render pointed to wrong domain (medisebi.vercel.app instead of frontend domain) - Fixed
+- Root Cause 4: Login form showed "Email/Username" placeholder but backend uses username lookup - Fixed to "Username"
+- Updated frontend .env.production with correct Render backend URL
+- Updated password min length hint from 8 to 12 to match backend config
+- Committed and pushed all fixes to GitHub
+- Created new Render service (old one got suspended) with correct CORS env vars
+- Redeployed frontend to Vercel via CLI upload
+- Verified: CORS preflight returns correct Access-Control-Allow-Origin header
+- Verified: Login API returns JWT tokens successfully from frontend origin
+
+Stage Summary:
+- Frontend: https://dist-three-bay-52.vercel.app
+- Backend: https://medisebi-api.onrender.com (health check + login confirmed working)
+- CORS: Properly configured for cross-origin requests
+- Auto-seed: Database auto-populates with 2 users, 4 salts, 6 medicines, 3 shops, 19 inventory items on every cold start
+- Test credentials: admin / Admin@12345! (or pharmacist1 / Pharm@12345!)
