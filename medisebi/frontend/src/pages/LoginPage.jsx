@@ -127,9 +127,9 @@ export default function LoginPage() {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Min 8 chars, uppercase, digit, special"
+                    placeholder="Min 12 chars, uppercase, digit, special"
                     required
-                    minLength={8}
+                    minLength={12}
                     className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all pr-10"
                   />
                   <button
@@ -163,13 +163,13 @@ export default function LoginPage() {
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">
-                  Email / Username
+                  Username
                 </label>
                 <input
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="admin@medisebi.com"
+                  placeholder="admin"
                   required
                   className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
                 />

@@ -2,21 +2,21 @@
 MediSebi — Password Hashing Module
 ====================================
 Provides bcrypt-based password hashing and verification.
-Uses passlib with configurable bcrypt rounds from application settings.
+Uses the bcrypt library directly for compatibility with bcrypt >= 4.1.
 """
 
-from passlib.context import CryptContext
+import bcrypt
+import re
 
 from app.core.config import settings
 
-# ── CryptContext Configuration ──────────────────────────────────
-# bcrypt rounds are loaded from settings (default 12, ~0.34s per hash)
-# This meets OWASP 2025 recommendations for work factor.
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto",
-    bcrypt__rounds=settings.BCRYPT_ROUNDS,
-)
+
+def _extract_rounds(hashed_password: str) -> int:
+    """Extract bcrypt rounds from an existing hash string."""
+    match = re.match(r'\$2[aby]\$(\d{2})\$', hashed_password)
+    if match:
+        return int(match.group(1))
+    return settings.BCRYPT_ROUNDS
 
 
 def hash_password(password: str) -> str:
@@ -29,7 +29,10 @@ def hash_password(password: str) -> str:
     Returns:
         Bcrypt hash string (e.g., $2b$12$...).
     """
-    return pwd_context.hash(password)
+    password_bytes = password.encode("utf-8")
+    salt = bcrypt.gensalt(rounds=settings.BCRYPT_ROUNDS)
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    return hashed.decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -43,7 +46,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         True if the password matches the hash, False otherwise.
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        password_bytes = plain_password.encode("utf-8")
+        hash_bytes = hashed_password.encode("utf-8")
+        return bcrypt.checkpw(password_bytes, hash_bytes)
+    except Exception:
+        return False
 
 
 def needs_rehash(hashed_password: str) -> bool:
@@ -59,4 +67,5 @@ def needs_rehash(hashed_password: str) -> bool:
     Returns:
         True if the hash should be rehashed with current settings.
     """
-    return pwd_context.needs_update(hashed_password)
+    existing_rounds = _extract_rounds(hashed_password)
+    return existing_rounds < settings.BCRYPT_ROUNDS
